@@ -9,8 +9,9 @@ from .clinical_trial_environment import ClinicalTrialEnvironment
 from models import TrialAction, TrialObservation
 
 # Create base app using OpenEnv's built-in web interface
-env = ClinicalTrialEnvironment()
-app = create_web_interface_app(env, TrialAction, TrialObservation)
+# Note: openenv-core>=0.2.1 expects the class, not an instance!
+env = ClinicalTrialEnvironment()  # Keep global instance for HTTP endpoints (/grader)
+app = create_web_interface_app(ClinicalTrialEnvironment, TrialAction, TrialObservation)
 
 app.add_middleware(
     CORSMiddleware,

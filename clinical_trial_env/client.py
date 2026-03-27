@@ -1,4 +1,4 @@
-from openenv.core.client import EnvClient
+from openenv.core import EnvClient
 from .models import TrialAction, TrialObservation
 
 

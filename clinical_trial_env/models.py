@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from openenv.core.models import Action as BaseAction, Observation as BaseObservation
+from openenv.core import Action as BaseAction, Observation as BaseObservation
 
 @dataclass
 class TrialAction(BaseAction):

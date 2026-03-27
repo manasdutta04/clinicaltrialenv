@@ -1,11 +1,12 @@
-from openenv.core.environment import Environment
-from openenv.core.models import State, StepResult
+from openenv.core import Environment
+from openenv.core.client_types import StepResult
+from openenv.core import State
 import uuid, numpy as np
 from .patient_simulator import PatientSimulator
 from .statistics import TrialStatistics
 from .tasks import TASKS
 from .graders import efficacy_grader, tradeoff_grader, efficiency_grader
-from ..models import TrialAction, TrialObservation
+from models import TrialAction, TrialObservation
 
 
 class ClinicalTrialEnvironment(Environment):

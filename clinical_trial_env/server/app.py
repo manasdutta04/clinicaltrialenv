@@ -6,7 +6,7 @@ from openenv.core.env_server import create_web_interface_app
 import os, asyncio, random, numpy as np
 
 from .clinical_trial_environment import ClinicalTrialEnvironment
-from ..models import TrialAction, TrialObservation
+from models import TrialAction, TrialObservation
 
 # Create base app using OpenEnv's built-in web interface
 env = ClinicalTrialEnvironment()
@@ -35,7 +35,7 @@ async def health():
 @app.get("/tasks")
 async def list_tasks():
     from .tasks import TASKS
-    from ..models import TrialAction
+    from models import TrialAction
     import dataclasses
     action_schema = {
         f.name: str(f.type) for f in dataclasses.fields(TrialAction)

@@ -28,6 +28,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Root Redirect ──────────────────────────────────────────────────────────────
+from fastapi.responses import RedirectResponse
+
+@app.get("/")
+async def root_redirect():
+    # Hugging Face initially loads the root URL. 
+    # Redirect it to OpenEnv's built-in web interface.
+    return RedirectResponse(url="/web")
+
 # ── Serve frontend dashboard ───────────────────────────────────────────────────
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 

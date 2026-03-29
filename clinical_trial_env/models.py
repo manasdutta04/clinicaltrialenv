@@ -1,38 +1,38 @@
-from dataclasses import dataclass, field
 from typing import Optional
 from openenv.core import Action as BaseAction, Observation as BaseObservation
 
-@dataclass
+
 class TrialAction(BaseAction):
-    n_next_cohort: int = 20          # patients to enroll before next interim
+    """Agent action: how to allocate patients in the next cohort."""
+    n_next_cohort: int = 20
     allocation_control: float = 0.25
     allocation_low: float = 0.25
     allocation_mid: float = 0.25
     allocation_high: float = 0.25
     stop_for_success: bool = False
     stop_for_futility: bool = False
-    drop_arm: Optional[str] = None   # "low", "mid", or "high"
+    drop_arm: Optional[str] = None
 
-    def __post_init__(self):
-        # Clamp n_next_cohort
+    def model_post_init(self, __context):
+        """Pydantic v2 equivalent of __post_init__: normalize allocations."""
         self.n_next_cohort = max(5, min(100, self.n_next_cohort))
-        # Normalize allocations to sum to 1.0
         total = (self.allocation_control + self.allocation_low +
                  self.allocation_mid + self.allocation_high)
         if total > 0:
-            self.allocation_control /= total
-            self.allocation_low /= total
-            self.allocation_mid /= total
-            self.allocation_high /= total
+            object.__setattr__(self, 'allocation_control', self.allocation_control / total)
+            object.__setattr__(self, 'allocation_low', self.allocation_low / total)
+            object.__setattr__(self, 'allocation_mid', self.allocation_mid / total)
+            object.__setattr__(self, 'allocation_high', self.allocation_high / total)
 
-@dataclass
+
 class TrialObservation(BaseObservation):
+    """Observed state of the adaptive clinical trial."""
     # Trial progress
     interim_number: int = 0
     total_patients_enrolled: int = 0
     budget_remaining: int = 0
 
-    # Per-arm observed response rates (NOT true rates — agent must infer)
+    # Per-arm observed response rates (hidden from agent — must infer)
     control_response_rate: float = 0.0
     low_response_rate: float = 0.0
     mid_response_rate: float = 0.0

@@ -1,20 +1,25 @@
+"""
+Data models for ClinicalTrialEnv.
+Uses the exact same base classes as openenv-core's template.
+"""
 from typing import Optional
-from openenv.core import Action as BaseAction, Observation as BaseObservation
+from pydantic import Field
+from openenv.core.env_server.types import Action, Observation
 
 
-class TrialAction(BaseAction):
-    """Agent action: how to allocate patients in the next cohort."""
-    n_next_cohort: int = 20
-    allocation_control: float = 0.25
-    allocation_low: float = 0.25
-    allocation_mid: float = 0.25
-    allocation_high: float = 0.25
-    stop_for_success: bool = False
-    stop_for_futility: bool = False
-    drop_arm: Optional[str] = None
+class TrialAction(Action):
+    """Agent action: how to design the next interim analysis cohort."""
+    n_next_cohort: int = Field(default=20, description="Patients to enroll (5-100)")
+    allocation_control: float = Field(default=0.25, description="Allocation weight for control arm")
+    allocation_low: float = Field(default=0.25, description="Allocation weight for low-dose arm")
+    allocation_mid: float = Field(default=0.25, description="Allocation weight for mid-dose arm")
+    allocation_high: float = Field(default=0.25, description="Allocation weight for high-dose arm")
+    stop_for_success: bool = Field(default=False, description="Signal early stop if p<0.05")
+    stop_for_futility: bool = Field(default=False, description="Signal early stop for futility")
+    drop_arm: Optional[str] = Field(default=None, description="Arm to drop: 'low', 'mid', 'high', or null")
 
     def model_post_init(self, __context):
-        """Pydantic v2 equivalent of __post_init__: normalize allocations."""
+        """Normalize allocation weights to sum to 1.0 and clamp cohort size."""
         self.n_next_cohort = max(5, min(100, self.n_next_cohort))
         total = (self.allocation_control + self.allocation_low +
                  self.allocation_mid + self.allocation_high)
@@ -25,53 +30,53 @@ class TrialAction(BaseAction):
             object.__setattr__(self, 'allocation_high', self.allocation_high / total)
 
 
-class TrialObservation(BaseObservation):
-    """Observed state of the adaptive clinical trial."""
+class TrialObservation(Observation):
+    """Observed state of the adaptive clinical trial returned after each action."""
     # Trial progress
-    interim_number: int = 0
-    total_patients_enrolled: int = 0
-    budget_remaining: int = 0
+    interim_number: int = Field(default=0)
+    total_patients_enrolled: int = Field(default=0)
+    budget_remaining: int = Field(default=0)
 
-    # Per-arm observed response rates (hidden from agent — must infer)
-    control_response_rate: float = 0.0
-    low_response_rate: float = 0.0
-    mid_response_rate: float = 0.0
-    high_response_rate: float = 0.0
+    # Per-arm observed response rates
+    control_response_rate: float = Field(default=0.0)
+    low_response_rate: float = Field(default=0.0)
+    mid_response_rate: float = Field(default=0.0)
+    high_response_rate: float = Field(default=0.0)
 
     # Per-arm adverse event rates
-    control_ae_rate: float = 0.0
-    low_ae_rate: float = 0.0
-    mid_ae_rate: float = 0.0
-    high_ae_rate: float = 0.0
+    control_ae_rate: float = Field(default=0.0)
+    low_ae_rate: float = Field(default=0.0)
+    mid_ae_rate: float = Field(default=0.0)
+    high_ae_rate: float = Field(default=0.0)
 
     # Per-arm patient counts
-    n_control: int = 0
-    n_low: int = 0
-    n_mid: int = 0
-    n_high: int = 0
+    n_control: int = Field(default=0)
+    n_low: int = Field(default=0)
+    n_mid: int = Field(default=0)
+    n_high: int = Field(default=0)
 
-    # Statistical signals (computed by scipy)
-    p_value_low: float = 1.0
-    p_value_mid: float = 1.0
-    p_value_high: float = 1.0
+    # Statistical signals (scipy Fisher's exact test)
+    p_value_low: float = Field(default=1.0)
+    p_value_mid: float = Field(default=1.0)
+    p_value_high: float = Field(default=1.0)
 
     # Bayesian posteriors P(arm > control)
-    prob_low_beats_control: float = 0.5
-    prob_mid_beats_control: float = 0.5
-    prob_high_beats_control: float = 0.5
+    prob_low_beats_control: float = Field(default=0.5)
+    prob_mid_beats_control: float = Field(default=0.5)
+    prob_high_beats_control: float = Field(default=0.5)
 
     # Power estimate
-    estimated_power: float = 0.0
+    estimated_power: float = Field(default=0.0)
 
     # Active arm flags
-    low_active: bool = True
-    mid_active: bool = True
-    high_active: bool = True
+    low_active: bool = Field(default=True)
+    mid_active: bool = Field(default=True)
+    high_active: bool = Field(default=True)
 
-    # Flags
-    any_arm_significant: bool = False
-    futility_flag: bool = False
+    # Stopping flags
+    any_arm_significant: bool = Field(default=False)
+    futility_flag: bool = Field(default=False)
 
-    # Episode metadata
-    task_id: str = "task_1"
-    stop_reason: Optional[str] = None
+    # Episode metadata — OpenEnv requires done and reward in Observation
+    task_id: str = Field(default="task_1")
+    stop_reason: Optional[str] = Field(default=None)

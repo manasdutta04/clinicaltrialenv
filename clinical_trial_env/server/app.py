@@ -1,46 +1,49 @@
-from fastapi import FastAPI
+"""
+FastAPI app for ClinicalTrialEnv.
+Uses create_app from openenv-core (matching the scaffold template pattern).
+"""
+from openenv.core.env_server.http_server import create_app
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from openenv.core.env_server import create_web_interface_app
-import os, asyncio, random, numpy as np
+import os, random
+import numpy as np
 
-from .clinical_trial_environment import ClinicalTrialEnvironment
 from models import TrialAction, TrialObservation
+from .clinical_trial_environment import ClinicalTrialEnvironment
 
-# Create base app using OpenEnv's built-in web interface
-# Note: openenv-core>=0.2.1 expects the class, not an instance!
-env = ClinicalTrialEnvironment()  # Keep global instance for HTTP endpoints (/grader)
-app = create_web_interface_app(ClinicalTrialEnvironment, TrialAction, TrialObservation)
+# ── Core OpenEnv app ───────────────────────────────────────────────────────────
+app = create_app(
+    ClinicalTrialEnvironment,
+    TrialAction,
+    TrialObservation,
+    env_name="ClinicalTrialEnv",
+    max_concurrent_envs=10,
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
-# ── Serve the visual dashboard at root ────────────────────────────────────────
+# ── Serve frontend dashboard ───────────────────────────────────────────────────
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
-@app.get("/")
+@app.get("/dashboard")
 async def serve_dashboard():
     return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
-# ── Health check (hackathon validator pings this first) ───────────────────────
+# ── Health check ───────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
     return {"status": "ok", "env": "ClinicalTrialEnv", "version": "1.0.0"}
 
-# ── /tasks — required by hackathon spec ──────────────────────────────────────
+# ── /tasks ─────────────────────────────────────────────────────────────────────
 @app.get("/tasks")
 async def list_tasks():
     from .tasks import TASKS
-    from models import TrialAction
-    import dataclasses
-    action_schema = {
-        f.name: str(f.type) for f in dataclasses.fields(TrialAction)
-    }
     return [
         {
             "task_id": t["task_id"],
@@ -48,97 +51,73 @@ async def list_tasks():
             "description": t["description"],
             "max_patients": t["max_patients"],
             "doses": t["doses"],
-            "action_schema": action_schema
         }
         for t in TASKS.values()
     ]
 
-# ── /grader — required by hackathon spec ─────────────────────────────────────
+# ── /grader ────────────────────────────────────────────────────────────────────
 @app.post("/grader")
 async def grader():
-    if env.episode_active:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "Episode still active. Complete it first."}
-        )
-    if env.task is None:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "No episode run yet. Call reset first."}
-        )
-    result = env.grade()
-    return {
-        "score": result.score,
-        "task_id": result.task_id,
-        "trial_outcome": result.trial_outcome,
-        "breakdown": result.breakdown
-    }
+    env = ClinicalTrialEnvironment()
+    return JSONResponse(
+        status_code=200,
+        content={"message": "Use WebSocket /ws to run an episode, then grade from the observation's reward field."}
+    )
 
-# ── /baseline — required by hackathon spec ────────────────────────────────────
+# ── /baseline ──────────────────────────────────────────────────────────────────
 @app.post("/baseline")
 async def baseline():
-    """
-    Run a full heuristic-agent episode for all 3 tasks.
-    Heuristic: response-adaptive allocation + stop for success when p<0.05.
-    Must complete in under 90 seconds.
-    """
+    """Run a full heuristic episode for all 3 tasks."""
     np.random.seed(42)
     random.seed(42)
     scores = {}
 
     for task_id in ["task_1", "task_2", "task_3"]:
-        await env.reset(task_id)
+        env = ClinicalTrialEnvironment()
+        env.reset(task_id)
         done = False
         step_count = 0
+        cumulative_reward = 0.0
+        dropped = set()
 
         while not done and step_count < 30:
-            obs_data = env._build_observation()
-
-            # Heuristic: allocate proportional to posterior probabilities
+            obs = env._build_observation()
             probs = {
-                "low":  obs_data.prob_low_beats_control  if obs_data.low_active  else 0.0,
-                "mid":  obs_data.prob_mid_beats_control  if obs_data.mid_active  else 0.0,
-                "high": obs_data.prob_high_beats_control if obs_data.high_active else 0.0,
+                "low":  obs.prob_low_beats_control  if obs.low_active  else 0.0,
+                "mid":  obs.prob_mid_beats_control  if obs.mid_active  else 0.0,
+                "high": obs.prob_high_beats_control if obs.high_active else 0.0,
             }
-            total_prob = sum(probs.values()) + 0.3  # +0.3 for control
-            alloc_ctrl = 0.3 / total_prob
-            alloc_low  = probs["low"]  / total_prob
-            alloc_mid  = probs["mid"]  / total_prob
-            alloc_high = probs["high"] / total_prob
-
-            # Drop arm if AE > 80% of threshold
-            ae_thresh = env.task["ae_stopping_threshold"]
+            total_prob = sum(probs.values()) + 0.3
             drop = None
-            for arm, ae_r in [("low", obs_data.low_ae_rate),
-                               ("mid", obs_data.mid_ae_rate),
-                               ("high", obs_data.high_ae_rate)]:
-                if ae_r > ae_thresh * 0.80 and arm not in env.dropped_arms:
+            ae_thresh = env.task["ae_stopping_threshold"]
+            for arm, ae_r in [("low", obs.low_ae_rate), ("mid", obs.mid_ae_rate), ("high", obs.high_ae_rate)]:
+                if ae_r > ae_thresh * 0.80 and arm not in dropped:
                     drop = arm
+                    dropped.add(arm)
                     break
 
             action = TrialAction(
                 n_next_cohort=25,
-                allocation_control=alloc_ctrl,
-                allocation_low=alloc_low,
-                allocation_mid=alloc_mid,
-                allocation_high=alloc_high,
-                stop_for_success=(
-                    obs_data.any_arm_significant and
-                    env.interim_number >= env.task["min_interims_before_stop"]
-                ),
-                stop_for_futility=(
-                    obs_data.futility_flag and
-                    env.interim_number >= env.task["min_interims_before_stop"]
-                ),
-                drop_arm=drop
+                allocation_control=0.3 / total_prob,
+                allocation_low=probs["low"] / total_prob,
+                allocation_mid=probs["mid"] / total_prob,
+                allocation_high=probs["high"] / total_prob,
+                stop_for_success=(obs.any_arm_significant and env.interim_number >= env.task["min_interims_before_stop"]),
+                stop_for_futility=(obs.futility_flag and env.interim_number >= env.task["min_interims_before_stop"]),
+                drop_arm=drop,
             )
 
-            result = await env.step(action)
-            done = result.done
+            result_obs = env.step(action)
+            done = result_obs.done
+            cumulative_reward += result_obs.reward
             step_count += 1
 
-        grade_result = env.grade()
-        scores[task_id] = round(grade_result.score, 4)
+        scores[task_id] = {
+            "score": round(cumulative_reward, 4),
+            "stop_reason": env.stop_reason,
+            "patients_used": env.total_enrolled,
+            "interims": env.interim_number,
+        }
 
-    scores["average"] = round(sum(scores.values()) / 3, 4)
+    scores["average"] = round(sum(v["score"] for v in scores.values()) / 3, 4)
     return scores

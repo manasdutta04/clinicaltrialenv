@@ -39,6 +39,9 @@ class ClinicalTrialEnvironment(Environment):
         self.stop_reason: str = None
         self.unsafe_arm_patients: int = 0
 
+        # Auto-initialize so step() works even before explicit reset()
+        self.reset("task_1")
+
     def reset(self, task_id: str = "task_1") -> TrialObservation:
         """Initialize a new trial episode."""
         if task_id not in TASKS:
@@ -67,6 +70,9 @@ class ClinicalTrialEnvironment(Environment):
 
     def step(self, action: TrialAction) -> TrialObservation:
         """Execute one interim analysis period."""
+        # Safety guard: if task is somehow None, reset with default
+        if self.task is None:
+            self.reset("task_1")
         if not self.episode_active:
             obs = self._build_observation()
             obs.done = True

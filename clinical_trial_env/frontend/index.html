@@ -515,7 +515,7 @@
 
     function initWebSocket() {
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        ws = new WebSocket(`${protocol}//${location.host}/ws`);
+        ws = new WebSocket(`${protocol}//${location.host}/ws/ui`);
         
         ws.onopen = () => {
             logEvent("WebSocket connected", "log-norm");
@@ -524,7 +524,7 @@
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            if (data.observation) {
+            if (data.type === "observation" && data.observation) {
                 lastObservation = data.observation;
                 updateUI(data.observation, data.done, data.reward);
             }
@@ -554,7 +554,7 @@
 
     function newTrial() {
         document.getElementById('score-overlay').style.display = 'none';
-        ws.send(JSON.stringify({ action: "reset", task_id: currentTask }));
+        ws.send(JSON.stringify({ type: "reset", task_id: currentTask }));
         document.getElementById('event-log').innerHTML = '';
         logEvent(`Started new trial for ${currentTask}`, "log-norm");
         isAutoRunning = false;
@@ -688,7 +688,7 @@
         };
         
         document.getElementById('input-drop').value = "";
-        ws.send(JSON.stringify({ action: "step", data: action }));
+        ws.send(JSON.stringify({ type: "step", action: action }));
     }
 
     async function startAutoRun() {

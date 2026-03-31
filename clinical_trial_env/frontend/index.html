@@ -523,10 +523,14 @@
         };
 
         ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.type === "observation" && data.observation) {
-                lastObservation = data.observation;
-                updateUI(data.observation, data.done, data.reward);
+            const response = JSON.parse(event.data);
+            const payload = response.data || response; // Handle nested OpenEnv response envelope
+            
+            if (payload.observation) {
+                lastObservation = payload.observation;
+                updateUI(payload.observation, payload.done, payload.reward);
+            } else if (response.type === "error") {
+                logEvent("Error: " + (payload.message || JSON.stringify(payload)), "log-crit");
             }
         };
 

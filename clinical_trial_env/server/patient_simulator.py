@@ -47,11 +47,13 @@ class PatientSimulator:
         self.rng = np.random.RandomState(seed)
         self.max_dose = 60.0  # reference for AE model
 
-    def true_response_rate(self, dose: float) -> float:
+    def true_response_rate(self, dose: float, strictness: float = 0.5) -> float:
         p = self.params
         if dose == 0:
             return p["baseline"]
-        numerator = p["emax"] * (dose ** p["hill"])
+        # Strict inclusion boosts homogeneous drug effects
+        effective_emax = p["emax"] * (0.5 + strictness) 
+        numerator = effective_emax * (dose ** p["hill"])
         denominator = (p["ed50"] ** p["hill"]) + (dose ** p["hill"])
         rate = p["baseline"] + numerator / denominator
         return float(np.clip(rate, 0.01, 0.99))
@@ -61,18 +63,19 @@ class PatientSimulator:
         rate = p["ae_baseline"] + p["ae_slope"] * ((dose / self.max_dose) ** 2)
         return float(np.clip(rate, 0.01, 0.99))
 
-    def enroll_cohort(self, n_patients: int, dose: float, arm: str) -> CohortResult:
+    def enroll_cohort(self, n_patients: int, dose: float, arm: str, strictness: float = 0.5) -> CohortResult:
         """
         Simulate n_patients at a given dose.
         Individual patient variability: ±5% noise on true response probability.
         Returns CohortResult with observed counts.
         """
-        true_p = self.true_response_rate(dose)
+        true_p = self.true_response_rate(dose, strictness)
         true_ae = self.true_ae_rate(dose)
 
-        # Individual variability — each patient has slightly different response prob
+        # Individual variability — looser criteria = more noise & heterogeneity
+        noise_std = 0.05 + ((1.0 - strictness) * 0.15) 
         patient_probs = np.clip(
-            self.rng.normal(true_p, 0.05, n_patients), 0.01, 0.99
+            self.rng.normal(true_p, noise_std, n_patients), 0.01, 0.99
         )
         responders = int(sum(self.rng.binomial(1, p) for p in patient_probs))
         adverse_events = int(self.rng.binomial(n_patients, true_ae))
@@ -85,5 +88,5 @@ class PatientSimulator:
             adverse_events=adverse_events
         )
 
-    def enroll_control(self, n_patients: int) -> CohortResult:
-        return self.enroll_cohort(n_patients, dose=0.0, arm="control")
+    def enroll_control(self, n_patients: int, strictness: float = 0.5) -> CohortResult:
+        return self.enroll_cohort(n_patients, dose=0.0, arm="control", strictness=strictness)

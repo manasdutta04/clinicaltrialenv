@@ -61,11 +61,24 @@ The reward function consists of a dense shaping reward at every step and a final
 
 The terminal reward is the explicit grader score (0.0 to 1.0) returned via the `/grader` endpoint.
 
+## Running the Baseline Solver Agent
+
+To demonstrate environmental flexibility and solvability, you can run the included autonomous "Heuristic" baseline solver.
+
+```bash
+python3 baseline_agent.py
+```
+This boots up an autonomous agent that parses Bayesian posterior outcomes and dynamically tightens the Trial's **inclusion criteria** to force statistical significance while staying under budget. An identical training layout is provided in `Environment_Demo.ipynb`.
+
 ## Statistical methods
 The environment uses `scipy` standard methodologies rather than approximations.
 * **Fisher's Exact Test:** Computes strict p-values for small-sample responder counts.
 * **Beta-Binomial Bayesian Inference:** Computes conservative posteriors using a continuous conjugate conjugate update.
 * **Predictive Probability of Success:** Full Monte Carlo estimation of future trial success dynamically informs the futility flags.
+* **Inclusion strictness:** 
+    1. **Biomarker strictness vs Budget:** RL agent must tune inclusion criteria. High strictness equals massive pharmacological effect sizes but heavily penalizes patient budget tracking.
+    2. **Patient Simulation Model**: Emax Model for Pharmacodynamics alongside Bayesian Inference testing.
+    3. **Budget and Ethics Constraint**: Agent is bound by max_patients budget and forced to monitor adversarial AE thresholds.
 
 ## Visual dashboard
 The built-in web dashboard provides a robust visualization of the trial trajectory:
@@ -98,13 +111,10 @@ openenv push --repo-id <your-hf-username>/clinical-trial-env
 
 | Endpoint | Method | Purpose |
 | :--- | :--- | :--- |
-| `/ws` | WebSocket | Main OpenEnv protocol (reset, step, state) |
-| `/tasks` | GET | List available tasks and schemas |
-| `/grader` | POST | Returns [0,1] score for completed episode |
-| `/baseline` | POST | Automatically runs heuristic baseline agent |
-| `/health` | GET | Healthcheck returning 200 OK |
-| `/` | GET | Redirects to /web (OpenEnv HumanAgent UI) |
-| `/dashboard` | GET | Serves the custom graphical dashboard HTML |
+| `/health` | GET | Check API server status |
+| `/schema` | GET | Returns action and observation JSON schemas |
+| `/reset` | POST | Initializes trial: `{"task_id": "task_1"}` |
+| `/step` | POST | Send actions, returns WSObservationResponse |
 
 ## Example session
 

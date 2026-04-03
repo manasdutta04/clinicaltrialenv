@@ -38,6 +38,9 @@ class ClinicalTrialEnvironment(Environment):
         self.episode_active: bool = False
         self.stop_reason: str = None
         self.unsafe_arm_patients: int = 0
+        self.budget_consumed: float = 0.0
+        self.last_strictness: float = 0.5
+        self.enroll_cost_multiplier: float = 1.0
 
         # Auto-initialize so step() works even before explicit reset()
         self.reset("task_1")
@@ -59,6 +62,9 @@ class ClinicalTrialEnvironment(Environment):
         self.episode_active = True
         self.stop_reason = None
         self.unsafe_arm_patients = 0
+        self.budget_consumed = 0.0
+        self.last_strictness = 0.5
+        self.enroll_cost_multiplier = 1.0
         self._state = State(episode_id=str(uuid4()), step_count=0)
 
         return TrialObservation(
@@ -94,16 +100,21 @@ class ClinicalTrialEnvironment(Environment):
 
         doses = self.task["doses"]
         ae_threshold = self.task["ae_stopping_threshold"]
+        strictness = action.inclusion_criteria_strictness
+        
+        self.last_strictness = strictness
+        self.enroll_cost_multiplier = 1.0 + (strictness ** 2) * 5.0
 
         for arm, count in arm_sizes.items():
             if count == 0:
                 continue
             if arm == "control":
-                cohort = self.simulator.enroll_control(count)
+                cohort = self.simulator.enroll_control(count, strictness=strictness)
             else:
-                cohort = self.simulator.enroll_cohort(count, doses[arm], arm)
+                cohort = self.simulator.enroll_cohort(count, doses[arm], arm, strictness=strictness)
             self.arm_data[arm].append(cohort)
             self.total_enrolled += count
+            self.budget_consumed += count * self.enroll_cost_multiplier
 
             cumulative_ae = (sum(c.adverse_events for c in self.arm_data[arm]) /
                              max(1, sum(c.n_enrolled for c in self.arm_data[arm])))
@@ -146,7 +157,7 @@ class ClinicalTrialEnvironment(Environment):
             obs.reward = reward
             return obs
 
-        if self.total_enrolled >= self.task["max_patients"]:
+        if self.budget_consumed >= self.task["max_patients"]:
             self.stop_reason = "budget_exhausted"
             self.episode_active = False
             reward = float(self._grade_score())
@@ -207,7 +218,9 @@ class ClinicalTrialEnvironment(Environment):
             task_id=self.task["task_id"] if self.task else "task_1",
             interim_number=self.interim_number,
             total_patients_enrolled=self.total_enrolled,
-            budget_remaining=max(0, self.task["max_patients"] - self.total_enrolled),
+            budget_remaining=int(max(0, self.task["max_patients"] - self.budget_consumed)),
+            enrollment_rate=round(1.0 / self.enroll_cost_multiplier, 4),
+            population_heterogeneity=round(0.05 + ((1.0 - self.last_strictness) * 0.15), 4),
             control_response_rate=round(rate(ctrl), 4),
             low_response_rate=round(rate(low), 4),
             mid_response_rate=round(rate(mid), 4),
@@ -243,7 +256,7 @@ class ClinicalTrialEnvironment(Environment):
                               ("high", obs.high_ae_rate)]:
             if arm not in self.dropped_arms and ae_rate > ae_thresh:
                 return "safety_stop"
-        if self.total_enrolled >= self.task["max_patients"]:
+        if self.budget_consumed >= self.task["max_patients"]:
             return "budget_exhausted"
         return None
 

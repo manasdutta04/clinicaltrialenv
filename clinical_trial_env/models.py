@@ -17,10 +17,12 @@ class TrialAction(Action):
     stop_for_success: bool = Field(default=False, description="Signal early stop if p<0.05")
     stop_for_futility: bool = Field(default=False, description="Signal early stop for futility")
     drop_arm: Optional[str] = Field(default=None, description="Arm to drop: 'low', 'mid', 'high', or null")
+    inclusion_criteria_strictness: float = Field(default=0.5, description="Strictness of patient inclusion [0.0 = relaxed, 1.0 = highly strict]")
 
     def model_post_init(self, __context):
         """Normalize allocation weights to sum to 1.0 and clamp cohort size."""
         self.n_next_cohort = max(5, min(100, self.n_next_cohort))
+        self.inclusion_criteria_strictness = max(0.0, min(1.0, self.inclusion_criteria_strictness))
         total = (self.allocation_control + self.allocation_low +
                  self.allocation_mid + self.allocation_high)
         if total > 0:
@@ -36,6 +38,8 @@ class TrialObservation(Observation):
     interim_number: int = Field(default=0)
     total_patients_enrolled: int = Field(default=0)
     budget_remaining: int = Field(default=0)
+    enrollment_rate: float = Field(default=1.0)
+    population_heterogeneity: float = Field(default=0.5)
 
     # Per-arm observed response rates
     control_response_rate: float = Field(default=0.0)

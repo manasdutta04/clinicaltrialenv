@@ -6,15 +6,18 @@ colorTo: green
 sdk: docker
 app_port: 7860
 ---
-# ClinicalTrialEnv
+# ClinicalTrialEnv 🧬
 
-ClinicalTrialEnv is a live OpenEnv reinforcement-learning environment for adaptive Phase II clinical trial design. Agents act as trial statisticians: they choose cohort size, allocation across dose arms, early stopping, arm dropping, and patient inclusion strictness to reach significance quickly while protecting patient safety.
+ClinicalTrialEnv is a live OpenEnv reinforcement-learning environment for adaptive Phase II clinical trial design. Agents act as autonomous trial statisticians: they choose cohort size, allocation across dose arms, early stopping, arm dropping, and patient inclusion strictness to reach significance quickly while strictly protecting patient safety.
 
-Built by Manas Dutta.
+**The Challenge: Ethics vs. Optimization**  
+Standard environments optimize for a simple score. `ClinicalTrialEnv` forces AI agents to formulate high-stakes trade-offs. The agent must balance **mathematical optimization** (powering a trial, achieving statistical significance, managing budget) against severe **ethical constraints** (limiting adverse patient events, avoiding over-enrollment in rare diseases, and swiftly dropping unsafe high-dose arms).
 
-Live deployment:
-- [Hugging Face Space](https://huggingface.co/spaces/manasdutta04/clinicaltrialenv)
-- [GitHub repository](https://github.com/manasdutta04/clinicaltrialenv)
+*Built by Manas Dutta.*
+
+### 🚀 Quick Links
+- **[Live Hugging Face Space](https://huggingface.co/spaces/manasdutta04/clinicaltrialenv)**
+- **[GitHub Repository](https://github.com/manasdutta04/clinicaltrialenv)**
 
 ## Tasks
 

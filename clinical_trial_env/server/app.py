@@ -99,14 +99,11 @@ async def grader(request: Request):
 
     if task_id and task_id in _completed_sessions:
         env_instance = _completed_sessions[task_id]
+    elif _completed_sessions:
+        env_instance = list(_completed_sessions.values())[-1]
     else:
-        env_instance = _latest_completed_session()
-
-    if env_instance is None:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "No completed episode. Run /baseline first or complete an episode."},
-        )
+        return JSONResponse(status_code=400,
+            content={"error": "No completed episode. Run /baseline first."})
 
     result = env_instance.grade()
     return {

@@ -19,7 +19,7 @@ tasks:
     max_patients: 250
   - id: task_3
     difficulty: hard
-    description: "Rare disease trial — weak effect, 150 patient budget"
+    description: "Phase II rare disease trial — weak effect, 150 patient budget"
     max_patients: 150
 action_space:
   n_next_cohort: {type: int, min: 5, max: 100, description: "Patients in next cohort"}

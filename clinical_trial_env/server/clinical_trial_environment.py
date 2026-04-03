@@ -7,11 +7,16 @@ import numpy as np
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import State
 
+from .graders import efficacy_grader, tradeoff_grader, efficiency_grader
 from .patient_simulator import PatientSimulator
+from .session_store import _completed_sessions
 from .statistics import TrialStatistics
 from .tasks import TASKS
-from .graders import efficacy_grader, tradeoff_grader, efficiency_grader
-from models import TrialAction, TrialObservation
+
+try:
+    from models import TrialAction, TrialObservation
+except ImportError:
+    from clinical_trial_env.models import TrialAction, TrialObservation
 
 
 class ClinicalTrialEnvironment(Environment):
@@ -135,6 +140,7 @@ class ClinicalTrialEnvironment(Environment):
             obs.stop_reason = forced_stop
             obs.done = True
             obs.reward = reward
+            self._mark_completed()
             return obs
 
         min_i = self.task["min_interims_before_stop"]
@@ -146,6 +152,7 @@ class ClinicalTrialEnvironment(Environment):
             obs.stop_reason = "success"
             obs.done = True
             obs.reward = reward
+            self._mark_completed()
             return obs
 
         if action.stop_for_futility and self.interim_number >= min_i:
@@ -155,6 +162,7 @@ class ClinicalTrialEnvironment(Environment):
             obs.stop_reason = "futility"
             obs.done = True
             obs.reward = reward
+            self._mark_completed()
             return obs
 
         if self.budget_consumed >= self.task["max_patients"]:
@@ -164,6 +172,7 @@ class ClinicalTrialEnvironment(Environment):
             obs.stop_reason = "budget_exhausted"
             obs.done = True
             obs.reward = reward
+            self._mark_completed()
             return obs
 
         # Continuing step reward
@@ -249,6 +258,11 @@ class ClinicalTrialEnvironment(Environment):
             reward=0.0,
         )
 
+    def _mark_completed(self) -> None:
+        """Persist the last completed environment per task for grading."""
+        if self.task:
+            _completed_sessions[self.task["task_id"]] = self
+
     def _check_forced_stops(self, obs: TrialObservation) -> str | None:
         ae_thresh = self.task["ae_stopping_threshold"]
         for arm, ae_rate in [("low", obs.low_ae_rate),
@@ -294,6 +308,7 @@ class ClinicalTrialEnvironment(Environment):
             "unsafe_arm_patients": self.unsafe_arm_patients,
             "interim_number": self.interim_number,
             "arm_data": self.arm_data,
+            "budget_consumed": self.budget_consumed,
         }
         grader_map = {
             "efficacy_grader": efficacy_grader,

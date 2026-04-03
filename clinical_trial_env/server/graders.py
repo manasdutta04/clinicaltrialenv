@@ -16,9 +16,10 @@ def efficacy_grader(session_state: dict) -> GraderResult:
     enrolled = session_state["total_enrolled"]
     max_p = session_state["task"]["max_patients"]
     best_p = session_state.get("best_pvalue", 1.0)
+    budget_consumed = session_state.get("budget_consumed", session_state["total_enrolled"])
+    efficiency = 1.0 - min(1.0, budget_consumed / max_p)
 
     if stop == "success":
-        efficiency = 1.0 - (enrolled / max_p)
         score = 0.60 + 0.40 * efficiency
     elif stop == "safety_stop":
         score = 0.15
@@ -35,7 +36,7 @@ def efficacy_grader(session_state: dict) -> GraderResult:
             "reached_significance": stop == "success",
             "patients_used": enrolled,
             "max_patients": max_p,
-            "efficiency": round(1.0 - enrolled / max_p, 3),
+            "efficiency": round(efficiency, 3),
             "best_pvalue": round(best_p, 4),
             "interims_run": session_state.get("interim_number", 0)
         }
@@ -80,9 +81,12 @@ def efficiency_grader(session_state: dict) -> GraderResult:
     max_p = session_state["task"]["max_patients"]
     best_p = session_state.get("best_pvalue", 1.0)
     best_posterior = session_state.get("best_posterior", 0.5)
+    patient_eff = 1.0 - min(
+        1.0,
+        session_state.get("budget_consumed", session_state["total_enrolled"]) / max_p,
+    )
 
     if stop == "success":
-        patient_eff = 1.0 - (enrolled / max_p)
         score = 0.50 + 0.30 * patient_eff + 0.20 * best_posterior
     elif stop == "futility":
         score = 0.20
@@ -97,6 +101,7 @@ def efficiency_grader(session_state: dict) -> GraderResult:
             "reached_significance": stop == "success",
             "patients_used": enrolled,
             "budget": max_p,
+            "efficiency": round(patient_eff, 3),
             "best_pvalue": round(best_p, 4),
             "best_posterior_prob": round(best_posterior, 3)
         }

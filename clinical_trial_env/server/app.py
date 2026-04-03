@@ -1,18 +1,25 @@
 """
 FastAPI app for ClinicalTrialEnv.
-Uses create_app from openenv-core (matching the scaffold template pattern).
+Uses openenv-core for WebSocket handling while overriding validator-sensitive HTTP routes.
 """
-from openenv.core.env_server.http_server import create_app
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-import os, random
+import os
+import random
+
 import numpy as np
+from fastapi import Body, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from openenv.core.env_server.http_server import create_app
 
-from models import TrialAction, TrialObservation
 from .clinical_trial_environment import ClinicalTrialEnvironment
+from .session_store import _completed_sessions
 
-# ── Core OpenEnv app ───────────────────────────────────────────────────────────
+try:
+    from models import TrialAction, TrialObservation
+except ImportError:
+    from clinical_trial_env.models import TrialAction, TrialObservation
+
+
 app = create_app(
     ClinicalTrialEnvironment,
     TrialAction,
@@ -21,6 +28,13 @@ app = create_app(
     max_concurrent_envs=10,
 )
 
+# Remove default routes that must match the hackathon validator contract exactly.
+app.router.routes = [
+    route
+    for route in app.router.routes
+    if getattr(route, "path", None) not in {"/reset", "/step", "/health"}
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,52 +42,81 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Root Redirect ──────────────────────────────────────────────────────────────
-from fastapi.responses import RedirectResponse
+FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
+
+
+def _latest_completed_session():
+    completed_items = [
+        (key, env)
+        for key, env in _completed_sessions.items()
+        if not key.startswith("http_")
+    ]
+    if not completed_items:
+        return None
+    return completed_items[-1][1]
+
 
 @app.get("/")
-async def root_redirect():
-    # Hugging Face initially loads the root URL. 
-    # Redirect it to OpenEnv's built-in web interface.
-    return RedirectResponse(url="/web")
+async def root():
+    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
-# ── Serve frontend dashboard ───────────────────────────────────────────────────
-FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
 @app.get("/dashboard")
 async def serve_dashboard():
     return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
-# ── Health check ───────────────────────────────────────────────────────────────
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "env": "ClinicalTrialEnv", "version": "1.0.0"}
 
-# ── /tasks ─────────────────────────────────────────────────────────────────────
+
 @app.get("/tasks")
 async def list_tasks():
     from .tasks import TASKS
+
+    action_schema = TrialAction.model_json_schema()
     return [
         {
-            "task_id": t["task_id"],
-            "difficulty": t["difficulty"],
-            "description": t["description"],
-            "max_patients": t["max_patients"],
-            "doses": t["doses"],
+            "task_id": task["task_id"],
+            "difficulty": task["difficulty"],
+            "description": task["description"],
+            "max_patients": task["max_patients"],
+            "doses": task["doses"],
+            "action_schema": action_schema,
         }
-        for t in TASKS.values()
+        for task in TASKS.values()
     ]
 
-# ── /grader ────────────────────────────────────────────────────────────────────
-@app.post("/grader")
-async def grader():
-    env = ClinicalTrialEnvironment()
-    return JSONResponse(
-        status_code=200,
-        content={"message": "Use WebSocket /ws to run an episode, then grade from the observation's reward field."}
-    )
 
-# ── /baseline ──────────────────────────────────────────────────────────────────
+@app.post("/grader")
+async def grader(request: Request):
+    try:
+        body = await request.json()
+        task_id = body.get("task_id") if body else None
+    except Exception:
+        task_id = None
+
+    if task_id and task_id in _completed_sessions:
+        env_instance = _completed_sessions[task_id]
+    else:
+        env_instance = _latest_completed_session()
+
+    if env_instance is None:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No completed episode. Run /baseline first or complete an episode."},
+        )
+
+    result = env_instance.grade()
+    return {
+        "score": float(np.clip(result.score, 0.0, 1.0)),
+        "task_id": result.task_id,
+        "trial_outcome": result.trial_outcome,
+        "breakdown": result.breakdown,
+    }
+
+
 @app.post("/baseline")
 async def baseline():
     """Run a full heuristic episode for all 3 tasks."""
@@ -86,21 +129,24 @@ async def baseline():
         env.reset(task_id)
         done = False
         step_count = 0
-        cumulative_reward = 0.0
         dropped = set()
 
         while not done and step_count < 30:
             obs = env._build_observation()
             probs = {
-                "low":  obs.prob_low_beats_control  if obs.low_active  else 0.0,
-                "mid":  obs.prob_mid_beats_control  if obs.mid_active  else 0.0,
+                "low": obs.prob_low_beats_control if obs.low_active else 0.0,
+                "mid": obs.prob_mid_beats_control if obs.mid_active else 0.0,
                 "high": obs.prob_high_beats_control if obs.high_active else 0.0,
             }
             total_prob = sum(probs.values()) + 0.3
             drop = None
             ae_thresh = env.task["ae_stopping_threshold"]
-            for arm, ae_r in [("low", obs.low_ae_rate), ("mid", obs.mid_ae_rate), ("high", obs.high_ae_rate)]:
-                if ae_r > ae_thresh * 0.80 and arm not in dropped:
+            for arm, ae_rate in (
+                ("low", obs.low_ae_rate),
+                ("mid", obs.mid_ae_rate),
+                ("high", obs.high_ae_rate),
+            ):
+                if ae_rate > ae_thresh * 0.80 and arm not in dropped:
                     drop = arm
                     dropped.add(arm)
                     break
@@ -111,22 +157,81 @@ async def baseline():
                 allocation_low=probs["low"] / total_prob,
                 allocation_mid=probs["mid"] / total_prob,
                 allocation_high=probs["high"] / total_prob,
-                stop_for_success=(obs.any_arm_significant and env.interim_number >= env.task["min_interims_before_stop"]),
-                stop_for_futility=(obs.futility_flag and env.interim_number >= env.task["min_interims_before_stop"]),
+                stop_for_success=(
+                    obs.any_arm_significant
+                    and env.interim_number >= env.task["min_interims_before_stop"]
+                ),
+                stop_for_futility=(
+                    obs.futility_flag
+                    and env.interim_number >= env.task["min_interims_before_stop"]
+                ),
                 drop_arm=drop,
             )
 
             result_obs = env.step(action)
             done = result_obs.done
-            cumulative_reward += result_obs.reward
             step_count += 1
 
+        grade_result = env.grade()
+        _completed_sessions[task_id] = env
         scores[task_id] = {
-            "score": round(cumulative_reward, 4),
+            "score": round(float(np.clip(grade_result.score, 0.0, 1.0)), 4),
             "stop_reason": env.stop_reason,
             "patients_used": env.total_enrolled,
             "interims": env.interim_number,
+            "breakdown": grade_result.breakdown,
         }
 
-    scores["average"] = round(sum(v["score"] for v in scores.values()) / 3, 4)
+    scores["average"] = round(
+        sum(
+            value["score"]
+            for _, value in scores.items()
+            if isinstance(value, dict) and "score" in value
+        )
+        / 3,
+        4,
+    )
     return scores
+
+
+@app.post("/reset")
+async def http_reset(body: dict = Body(default={"task": "task_1"})):
+    task_id = body.get("task", body.get("task_id", "task_1"))
+    env = ClinicalTrialEnvironment()
+    obs = env.reset(task_id)
+    session_key = f"http_{task_id}_{id(env)}"
+    _completed_sessions[session_key] = env
+    _completed_sessions[f"http_active_{task_id}"] = env
+    return {
+        "session_id": session_key,
+        "task": task_id,
+        "observation": obs.model_dump(),
+        "message": "Episode started. Use WebSocket /ws for interactive stepping.",
+    }
+
+
+@app.post("/step")
+async def http_step(action: TrialAction):
+    active = {
+        key: env
+        for key, env in _completed_sessions.items()
+        if key.startswith("http_active_")
+    }
+    if not active:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No active HTTP session. POST /reset first."},
+        )
+
+    active_key, env = list(active.items())[-1]
+    obs = env.step(action)
+    if obs.done:
+        task_id = env.task["task_id"] if env.task else "unknown"
+        _completed_sessions[task_id] = env
+        _completed_sessions.pop(active_key, None)
+
+    return {
+        "observation": obs.model_dump(),
+        "reward": float(obs.reward),
+        "done": bool(obs.done),
+    }

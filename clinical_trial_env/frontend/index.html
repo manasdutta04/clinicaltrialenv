@@ -408,21 +408,21 @@
             
             <div class="action-group">
                 <label>Next Cohort Size: <span id="cohort-val">20</span></label>
-                <input type="range" id="input-cohort" min="5" max="100" value="20" oninput="document.getElementById('cohort-val').innerText=this.value">
+                <input type="range" id="input-cohort" min="5" max="100" value="20" oninput="userHasInteracted = true; document.getElementById('cohort-val').innerText=this.value">
             </div>
 
             <div class="action-group" style="margin-top: 15px; margin-bottom: 15px;">
                 <label>Inclusion Strictness: <span id="strictness-val">0.5</span></label>
-                <input type="range" id="input-strictness" min="0" max="1" step="0.05" value="0.5" oninput="document.getElementById('strictness-val').innerText=this.value">
+                <input type="range" id="input-strictness" min="0" max="1" step="0.05" value="0.5" oninput="userHasInteracted = true; document.getElementById('strictness-val').innerText=this.value">
                 <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 4px;">Higher = stronger response, but burns enrollment budget rapidly.</div>
             </div>
 
             <label>Allocation Ratios (Auto-normalized)</label>
             <div class="alloc-sliders">
-                <div class="slider-row"><span>Control</span><input type="range" min="0" max="100" value="25" id="alloc-ctl" oninput="updateAlloc()"> <span id="val-ctl">25%</span></div>
-                <div class="slider-row"><span>Low</span><input type="range" min="0" max="100" value="25" id="alloc-low" oninput="updateAlloc()"> <span id="val-low">25%</span></div>
-                <div class="slider-row"><span>Mid</span><input type="range" min="0" max="100" value="25" id="alloc-mid" oninput="updateAlloc()"> <span id="val-mid">25%</span></div>
-                <div class="slider-row"><span>High</span><input type="range" min="0" max="100" value="25" id="alloc-high" oninput="updateAlloc()"> <span id="val-high">25%</span></div>
+                <div class="slider-row"><span>Control</span><input type="range" min="0" max="100" value="25" id="alloc-ctl" oninput="userHasInteracted = true; updateAlloc()"> <span id="val-ctl">25%</span></div>
+                <div class="slider-row"><span>Low</span><input type="range" min="0" max="100" value="25" id="alloc-low" oninput="userHasInteracted = true; updateAlloc()"> <span id="val-low">25%</span></div>
+                <div class="slider-row"><span>Mid</span><input type="range" min="0" max="100" value="25" id="alloc-mid" oninput="userHasInteracted = true; updateAlloc()"> <span id="val-mid">25%</span></div>
+                <div class="slider-row"><span>High</span><input type="range" min="0" max="100" value="25" id="alloc-high" oninput="userHasInteracted = true; updateAlloc()"> <span id="val-high">25%</span></div>
             </div>
             <div id="alloc-warn" style="color:var(--accent-red); font-size:0.875rem; display:none;">Sum is 0! Will default to uniform.</div>
 
@@ -441,6 +441,7 @@
             </div>
             <div class="action-buttons">
                 <button class="primary-btn" style="background:#8b5cf6;" onclick="startAutoRun()" id="btn-auto">Auto-run Heuristic</button>
+                <button id="btn-cancel" class="danger-btn" style="display:none" onclick="isAutoRunning=false; document.getElementById('btn-cancel').style.display='none'; document.getElementById('btn-auto').style.display='inline-block'">Cancel</button>
             </div>
         </div>
     </div>
@@ -466,6 +467,7 @@
         <h2 style="margin-top:0;">Episode Complete</h2>
         <div id="score-badge" class="badge">OUTCOME</div>
         <div class="score-huge" id="score-val">0.00</div>
+        <p id="score-insight" style="color:#94a3b8;font-size:0.9rem;margin:10px 0"></p>
         
         <table class="breakdown-table" id="score-table">
             <tbody></tbody>
@@ -485,11 +487,22 @@
         datasets: [
             { label: 'Low', data: [], borderColor: '#3b82f6', tension: 0.1 },
             { label: 'Mid', data: [], borderColor: '#10b981', tension: 0.1 },
-            { label: 'High', data: [], borderColor: '#8b5cf6', tension: 0.1 }
+            { label: 'High', data: [], borderColor: '#8b5cf6', tension: 0.1 },
+            {
+                label: 'p=0.05 (significance)',
+                data: [],
+                borderColor: '#ef4444',
+                borderDash: [5,5],
+                borderWidth: 1.5,
+                pointRadius: 0,
+                tension: 0,
+                fill: false
+            }
         ]
     };
     
     let isAutoRunning = false;
+    let userHasInteracted = false;
     let maxPatStr = 200;
 
     function initChart() {
@@ -503,17 +516,6 @@
                 scales: {
                     y: { reverse: true, min: 0, max: 1 },
                     x: { title: { display: true, text: 'Interim Number' } }
-                },
-                plugins: {
-                    annotation: {
-                        annotations: {
-                            line1: {
-                                type: 'line',
-                                yMin: 0.05, yMax: 0.05,
-                                borderColor: 'red', borderWidth: 2, borderDash: [5, 5]
-                            }
-                        }
-                    }
                 }
             }
         });
@@ -568,6 +570,7 @@
         document.getElementById('event-log').innerHTML = '';
         logEvent(`Started new trial for ${currentTask}`, "log-norm");
         isAutoRunning = false;
+        userHasInteracted = false;
         
         chartData.labels = [];
         chartData.datasets.forEach(d => d.data = []);
@@ -578,6 +581,8 @@
         document.getElementById('btn-succ').disabled = false;
         document.getElementById('btn-fut').disabled = false;
         document.getElementById('btn-auto').disabled = false;
+        document.getElementById('btn-auto').style.display = 'inline-block';
+        document.getElementById('btn-cancel').style.display = 'none';
         
         document.getElementById('env-status').className = 'status-badge active';
         document.getElementById('env-status').innerText = 'Active';
@@ -590,7 +595,7 @@
         const h = parseFloat(document.getElementById('alloc-high').value);
         const t = c+l+m+h;
         if(t === 0) {
-            document.getElementById('alloc-warn').style.display = 'block';
+            document.getElementById('alloc-warn').style.display = userHasInteracted ? 'block' : 'none';
             return;
         }
         document.getElementById('alloc-warn').style.display = 'none';
@@ -657,6 +662,7 @@
             chartData.datasets[0].data.push(obs.p_value_low);
             chartData.datasets[1].data.push(obs.p_value_mid);
             chartData.datasets[2].data.push(obs.p_value_high);
+            chartData.datasets[3].data.push(0.05);
             chart.update();
         }
 
@@ -673,6 +679,8 @@
             
             ['btn-step', 'btn-succ', 'btn-fut', 'btn-auto'].forEach(id => document.getElementById(id).disabled = true);
             isAutoRunning = false;
+            document.getElementById('btn-auto').style.display = 'inline-block';
+            document.getElementById('btn-cancel').style.display = 'none';
             
             logEvent(`Episode terminated. Reason: ${obs.stop_reason}`, "log-crit");
             setTimeout(fetchGrader, 500);
@@ -705,6 +713,8 @@
     async function startAutoRun() {
         if(!lastObservation || isAutoRunning) return;
         isAutoRunning = true;
+        document.getElementById('btn-auto').style.display = 'none';
+        document.getElementById('btn-cancel').style.display = 'inline-block';
         
         while(isAutoRunning && document.getElementById('env-status').innerText !== 'Done') {
             const obs = lastObservation;
@@ -734,6 +744,9 @@
             runStep(succ, fut);
             await new Promise(r => setTimeout(r, 400));
         }
+
+        document.getElementById('btn-auto').style.display = 'inline-block';
+        document.getElementById('btn-cancel').style.display = 'none';
     }
 
     async function fetchGrader() {
@@ -748,6 +761,7 @@
         const overlay = document.getElementById('score-overlay');
         const scVal = document.getElementById('score-val');
         const badge = document.getElementById('score-badge');
+        const insightEl = document.getElementById('score-insight');
         const table = document.getElementById('score-table').querySelector('tbody');
         
         overlay.style.display = 'flex';
@@ -761,6 +775,21 @@
         if(grade.trial_outcome === 'success') badge.className = 'badge bg-green';
         else if(grade.trial_outcome === 'safety_stop') badge.className = 'badge bg-red';
         else badge.className = 'badge bg-amber';
+
+        const enrolled = lastObservation?.total_patients_enrolled ?? '?';
+        const maxP = (lastObservation?.total_patients_enrolled ?? 0) + (lastObservation?.budget_remaining ?? 0);
+        const saved = maxP - (lastObservation?.total_patients_enrolled ?? 0);
+        let insight = '';
+        if (grade.trial_outcome === 'success') {
+            insight = `Agent reached significance using ${enrolled}/${maxP} patients - ${saved} patients saved.`;
+        } else if (grade.trial_outcome === 'futility') {
+            insight = `Correctly stopped early - saved ${saved} patients from unnecessary exposure.`;
+        } else if (grade.trial_outcome === 'safety_stop') {
+            insight = 'Stopped for patient safety - adverse event threshold exceeded.';
+        } else {
+            insight = `Budget exhausted. Best p-value: ${Math.min(lastObservation?.p_value_low ?? 1, lastObservation?.p_value_mid ?? 1, lastObservation?.p_value_high ?? 1).toFixed(4)}`;
+        }
+        insightEl.innerText = insight;
         
         table.innerHTML = '';
         for(const [k, v] of Object.entries(grade.breakdown)) {

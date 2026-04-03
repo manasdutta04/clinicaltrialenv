@@ -1,257 +1,203 @@
 #!/usr/bin/env python3
 """
-ClinicalTrialEnv - LLM-powered inference agent.
-Follows the mandatory Scaler x Meta PyTorch OpenEnv Hackathon format exactly.
-
-Usage:
-    API_BASE_URL=<url> MODEL_NAME=<model> HF_TOKEN=<token> python inference.py
-
-Environment variables:
-    API_BASE_URL     - OpenAI-compatible API base URL (required, has default)
-    MODEL_NAME       - Model identifier (required, has default)
-    HF_TOKEN         - Hugging Face token for the Space (required, no default)
-    LOCAL_IMAGE_NAME - Optional Docker image name if running locally
+ClinicalTrialEnv inference agent.
+Hackathon mandatory submission file — follows [START]/[STEP]/[END] log format.
 """
-import asyncio
-import json
-import os
-
-import requests
-import websockets
+import os, json, asyncio, websockets, requests
 from openai import OpenAI
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v1/")
-MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
+# Mandatory env vars — defaults ONLY for API_BASE_URL and MODEL_NAME
+API_BASE_URL     = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v1/")
+MODEL_NAME       = os.getenv("MODEL_NAME",   "meta-llama/Llama-3.1-8B-Instruct")
 HF_TOKEN = os.getenv("HF_TOKEN")
-LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")   # optional, no default
+ENV_URL          = os.getenv("ENV_URL", "https://manasdutta04-clinicaltrialenv.hf.space")
 
-ENV_URL = os.getenv(
-    "ENV_URL",
-    "https://manasdutta04-clinicaltrialenv.hf.space",
-)
-
-client = OpenAI(
-    base_url=API_BASE_URL,
-    api_key=HF_TOKEN or "no-token",
-)
+# OpenAI client using the mandatory variables
+client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "no-token")
 
 TASKS = ["task_1", "task_2", "task_3"]
 
-SYSTEM_PROMPT = """You are an expert clinical trial statistician making adaptive
-trial design decisions. You will receive observations from an adaptive clinical
-trial and must decide how to proceed.
+SYSTEM_PROMPT = """You are a clinical trial statistician making adaptive decisions.
+Given trial observations, decide the next action to maximize statistical power
+while minimizing patients used and keeping adverse events safe.
 
-Your goal: Reach statistical significance (p < 0.05) while using as few patients
-as possible, maintaining patient safety (keep AE rates below thresholds).
-
-You must respond with ONLY a valid JSON object matching this schema:
+Respond ONLY with valid JSON matching this exact schema (no markdown, no explanation):
 {
   "n_next_cohort": <int 5-100>,
-  "allocation_control": <float 0-1>,
-  "allocation_low": <float 0-1>,
-  "allocation_mid": <float 0-1>,
-  "allocation_high": <float 0-1>,
+  "allocation_control": <float>,
+  "allocation_low": <float>,
+  "allocation_mid": <float>,
+  "allocation_high": <float>,
   "stop_for_success": <bool>,
   "stop_for_futility": <bool>,
   "drop_arm": <null or "low" or "mid" or "high">,
-  "inclusion_criteria_strictness": <float 0-1>,
-  "reasoning": "<brief one-line reasoning>"
+  "inclusion_criteria_strictness": <float 0-1>
 }
 
-Allocation weights do NOT need to sum to 1 - they will be normalized automatically.
-
-Strategy tips:
-- Allocate more patients to arms with higher P(arm > control) (Bayesian posterior)
-- Stop for success when any_arm_significant=true AND interim_number >= 2
-- Stop for futility when futility_flag=true AND interim_number >= 2
-- Drop an arm if its AE rate > 0.80 * threshold
-- Use inclusion_criteria_strictness=0.7 for cleaner signal, 0.3 for speed"""
+Rules:
+- Allocate more to arms with higher prob_X_beats_control
+- stop_for_success=true when any_arm_significant=true AND interim_number >= 2
+- stop_for_futility=true when futility_flag=true AND interim_number >= 2
+- drop_arm if its ae_rate > 0.20 and arm is active
+- Allocations are auto-normalized, they don't need to sum to 1"""
 
 
-def _heuristic_fallback(obs: dict) -> dict:
-    """Fallback heuristic when the LLM call fails."""
+def _heuristic(obs: dict) -> dict:
+    """Fallback heuristic when LLM is unavailable."""
     probs = {
-        "low": obs.get("prob_low_beats_control", 0.5) if obs.get("low_active", True) else 0.0,
-        "mid": obs.get("prob_mid_beats_control", 0.5) if obs.get("mid_active", True) else 0.0,
+        "low":  obs.get("prob_low_beats_control",  0.5) if obs.get("low_active",  True) else 0.0,
+        "mid":  obs.get("prob_mid_beats_control",  0.5) if obs.get("mid_active",  True) else 0.0,
         "high": obs.get("prob_high_beats_control", 0.5) if obs.get("high_active", True) else 0.0,
     }
     total = sum(probs.values()) + 0.3
     drop = None
-    for arm, ae in (
-        ("low", obs.get("low_ae_rate", 0.0)),
-        ("mid", obs.get("mid_ae_rate", 0.0)),
-        ("high", obs.get("high_ae_rate", 0.0)),
-    ):
-        if ae > 0.20 and obs.get(f"{arm}_active", True):
+    for arm in ["low", "mid", "high"]:
+        if obs.get(f"{arm}_ae_rate", 0) > 0.20 and obs.get(f"{arm}_active", True):
             drop = arm
             break
-
     interim = obs.get("interim_number", 0)
     return {
         "n_next_cohort": 25,
         "allocation_control": 0.3 / total,
-        "allocation_low": probs["low"] / total,
-        "allocation_mid": probs["mid"] / total,
-        "allocation_high": probs["high"] / total,
-        "stop_for_success": obs.get("any_arm_significant", False) and interim >= 2,
+        "allocation_low":     probs["low"]  / total,
+        "allocation_mid":     probs["mid"]  / total,
+        "allocation_high":    probs["high"] / total,
+        "stop_for_success":  obs.get("any_arm_significant", False) and interim >= 2,
         "stop_for_futility": obs.get("futility_flag", False) and interim >= 2,
         "drop_arm": drop,
         "inclusion_criteria_strictness": 0.6,
     }
 
 
-def llm_decide_action(obs: dict, task_id: str, step_num: int) -> dict:
-    """Use the configured OpenAI-compatible client to choose the next action."""
-    obs_summary = {
-        "interim": obs.get("interim_number", 0),
-        "enrolled": obs.get("total_patients_enrolled", 0),
-        "budget_left": obs.get("budget_remaining", 0),
-        "resp_rates": {
-            "control": obs.get("control_response_rate", 0.0),
-            "low": obs.get("low_response_rate", 0.0),
-            "mid": obs.get("mid_response_rate", 0.0),
-            "high": obs.get("high_response_rate", 0.0),
-        },
-        "ae_rates": {
-            "low": obs.get("low_ae_rate", 0.0),
-            "mid": obs.get("mid_ae_rate", 0.0),
-            "high": obs.get("high_ae_rate", 0.0),
-        },
-        "p_values": {
-            "low": obs.get("p_value_low", 1.0),
-            "mid": obs.get("p_value_mid", 1.0),
-            "high": obs.get("p_value_high", 1.0),
-        },
-        "posteriors": {
-            "low": obs.get("prob_low_beats_control", 0.5),
-            "mid": obs.get("prob_mid_beats_control", 0.5),
-            "high": obs.get("prob_high_beats_control", 0.5),
-        },
-        "any_significant": obs.get("any_arm_significant", False),
-        "futility_flag": obs.get("futility_flag", False),
-        "active_arms": {
-            "low": obs.get("low_active", True),
-            "mid": obs.get("mid_active", True),
-            "high": obs.get("high_active", True),
-        },
-    }
-
-    user_msg = f"""Task: {task_id} | Step: {step_num}
-Current trial state:
-{json.dumps(obs_summary, indent=2)}
-
-Decide the next action. Remember: respond with ONLY valid JSON."""
-
+def llm_action(obs: dict, task_id: str, step_num: int) -> dict:
+    """Ask LLM for action; fall back to heuristic on any error."""
     try:
-        response = client.chat.completions.create(
+        summary = {
+            "task_id": task_id, "step": step_num,
+            "interim": obs.get("interim_number", 0),
+            "enrolled": obs.get("total_patients_enrolled", 0),
+            "budget_left": obs.get("budget_remaining", 0),
+            "response_rates": {
+                "control": obs.get("control_response_rate", 0),
+                "low": obs.get("low_response_rate", 0),
+                "mid": obs.get("mid_response_rate", 0),
+                "high": obs.get("high_response_rate", 0),
+            },
+            "ae_rates": {
+                "low": obs.get("low_ae_rate", 0),
+                "mid": obs.get("mid_ae_rate", 0),
+                "high": obs.get("high_ae_rate", 0),
+            },
+            "p_values": {
+                "low": obs.get("p_value_low", 1.0),
+                "mid": obs.get("p_value_mid", 1.0),
+                "high": obs.get("p_value_high", 1.0),
+            },
+            "posteriors": {
+                "low": obs.get("prob_low_beats_control", 0.5),
+                "mid": obs.get("prob_mid_beats_control", 0.5),
+                "high": obs.get("prob_high_beats_control", 0.5),
+            },
+            "any_significant": obs.get("any_arm_significant", False),
+            "futility_flag":   obs.get("futility_flag", False),
+            "active": {
+                "low":  obs.get("low_active",  True),
+                "mid":  obs.get("mid_active",  True),
+                "high": obs.get("high_active", True),
+            },
+        }
+        resp = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_msg},
+                {"role": "user",   "content": json.dumps(summary)},
             ],
-            max_tokens=300,
+            max_tokens=256,
             temperature=0.1,
         )
-        raw = response.choices[0].message.content.strip()
+        raw = resp.choices[0].message.content.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        action_with_reasoning = json.loads(raw.strip())
-        action_with_reasoning.pop("reasoning", None)
-        return action_with_reasoning
+        return json.loads(raw.strip())
     except Exception:
-        return _heuristic_fallback(obs)
+        return _heuristic(obs)
 
 
 async def run_task(task_id: str) -> dict:
-    """Run one task from reset through grading."""
-    ws_url = ENV_URL.replace("https://", "wss://").replace("http://", "ws://") + "/ws"
+    ws_url   = ENV_URL.replace("https://", "wss://").replace("http://", "ws://") + "/ws"
     http_url = ENV_URL
+    headers  = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
 
-    results = {
-        "task_id": task_id,
-        "total_steps": 0,
-        "total_reward": 0.0,
-        "score": 0.0,
-        "outcome": "unknown",
-    }
+    result = {"task_id": task_id, "total_steps": 0,
+              "total_reward": 0.0, "score": 0.0, "outcome": "unknown"}
 
-    async with websockets.connect(ws_url, ping_interval=30, ping_timeout=10) as ws:
+    async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
+        # Reset
         await ws.send(json.dumps({"type": "reset", "data": {"task_id": task_id}}))
-        msg = json.loads(await ws.recv())
+        msg     = json.loads(await ws.recv())
         payload = msg.get("data", msg)
-        obs = payload.get("observation", {})
+        obs     = payload.get("observation", {})
 
-        print(
-            f'[START] {json.dumps({"task_id": task_id, "model": MODEL_NAME, "env_url": ENV_URL})}',
-            flush=True,
-        )
+        # [START] — mandatory format
+        print(f'[START] {json.dumps({"task_id": task_id, "model": MODEL_NAME, "env_url": ENV_URL})}',
+              flush=True)
 
-        step_num = 0
-        done = False
-        total_reward = 0.0
+        step_num, done, total_reward = 0, False, 0.0
 
         while not done and step_num < 30:
             step_num += 1
-            action = llm_decide_action(obs, task_id, step_num)
+            action = llm_action(obs, task_id, step_num)
 
             await ws.send(json.dumps({"type": "step", "data": action}))
-            msg = json.loads(await ws.recv())
+            msg     = json.loads(await ws.recv())
             payload = msg.get("data", msg)
-            new_obs = payload.get("observation", {})
-            reward = float(payload.get("reward", 0.0))
-            done = bool(payload.get("done", False))
+            obs     = payload.get("observation", {})
+            reward  = float(payload.get("reward", 0.0))
+            done    = bool(payload.get("done", False))
             total_reward += reward
 
-            print(
-                f'[STEP] {json.dumps({"step": step_num, "action": action, "observation": new_obs, "reward": round(reward, 4), "done": done})}',
-                flush=True,
-            )
+            # [STEP] — mandatory format
+            print(f'[STEP] {json.dumps({"step": step_num, "action": action, "observation": obs, "reward": round(reward, 4), "done": done})}',
+                  flush=True)
 
-            obs = new_obs
+        result["total_steps"]  = step_num
+        result["total_reward"] = round(total_reward, 4)
 
-        results["total_steps"] = step_num
-        results["total_reward"] = round(total_reward, 4)
-
+        # Get grader score via HTTP
         try:
-            response = requests.post(
+            r = requests.post(
                 f"{http_url}/grader",
                 json={"task_id": task_id},
                 timeout=30,
-                headers={"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {},
+                headers=headers,
             )
-            response.raise_for_status()
-            grade = response.json()
-            results["score"] = round(float(grade.get("score", 0.0)), 4)
-            results["outcome"] = grade.get("trial_outcome", "unknown")
+            r.raise_for_status()
+            grade = r.json()
+            result["score"]   = round(float(grade.get("score", 0.0)), 4)
+            result["outcome"] = grade.get("trial_outcome", "unknown")
         except Exception:
-            results["score"] = round(max(0.0, min(1.0, total_reward)), 4)
-            results["outcome"] = obs.get("stop_reason", "unknown") or "budget_exhausted"
+            result["score"]   = round(max(0.0, min(1.0, total_reward / max(step_num, 1))), 4)
+            result["outcome"] = obs.get("stop_reason") or "budget_exhausted"
 
-    print(
-        f'[END] {json.dumps({"task_id": task_id, "total_steps": results["total_steps"], "total_reward": results["total_reward"], "score": results["score"], "outcome": results["outcome"]})}',
-        flush=True,
-    )
-    return results
+    # [END] — mandatory format
+    print(f'[END] {json.dumps({"task_id": result["task_id"], "total_steps": result["total_steps"], "total_reward": result["total_reward"], "score": result["score"], "outcome": result["outcome"]})}',
+          flush=True)
+    return result
 
 
-async def main() -> None:
-    """Run all tasks sequentially."""
+async def main():
     if not HF_TOKEN:
-        print("[WARN] HF_TOKEN not set - some requests may fail", flush=True)
-
-    all_scores = []
+        print('[WARN] {"message": "HF_TOKEN not set, LLM calls may fail"}', flush=True)
+    scores = []
     for task_id in TASKS:
-        result = await run_task(task_id)
-        all_scores.append(result["score"])
-
-    average = round(sum(all_scores) / len(all_scores), 4)
-    print(
-        f'[SUMMARY] {json.dumps({"task_1": all_scores[0], "task_2": all_scores[1], "task_3": all_scores[2], "average": average})}',
-        flush=True,
-    )
-
+        r = await run_task(task_id)
+        scores.append(r["score"])
+    avg = round(sum(scores) / len(scores), 4)
+    print(f'[SUMMARY] {json.dumps({"task_1": scores[0], "task_2": scores[1], "task_3": scores[2], "average": avg})}',
+          flush=True)
 
 if __name__ == "__main__":
     asyncio.run(main())

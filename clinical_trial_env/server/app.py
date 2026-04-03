@@ -232,3 +232,13 @@ async def http_step(action: TrialAction):
         "reward": float(obs.reward),
         "done": bool(obs.done),
     }
+
+
+def main():
+    import uvicorn
+
+    uvicorn.run("server.app:app", host="0.0.0.0", port=7860, reload=False)
+
+
+if __name__ == "__main__":
+    main()

@@ -107,7 +107,7 @@ async def grader(request: Request):
 
     result = env_instance.grade()
     return {
-        "score": float(np.clip(result.score, 0.0, 1.0)),
+        "score": float(np.clip(result.score, 0.001, 0.999)),
         "task_id": result.task_id,
         "trial_outcome": result.trial_outcome,
         "breakdown": result.breakdown,
@@ -172,7 +172,7 @@ async def baseline():
         grade_result = env.grade()
         _completed_sessions[task_id] = env
         scores[task_id] = {
-            "score": round(float(np.clip(grade_result.score, 0.0, 1.0)), 4),
+            "score": round(float(np.clip(grade_result.score, 0.001, 0.999)), 4),
             "stop_reason": env.stop_reason,
             "patients_used": env.total_enrolled,
             "interims": env.interim_number,

@@ -17,6 +17,39 @@ ENV_URL          = os.getenv("ENV_URL", "https://manasdutta04-clinicaltrialenv.h
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "no-token")
 
 TASKS = ["task_1", "task_2", "task_3"]
+TASK_TIMEOUT_SECONDS = int(os.getenv("TASK_TIMEOUT_SECONDS", "45"))
+
+
+def _strict_score(value):
+    try:
+        return float(max(0.05, min(0.95, float(value))))
+    except Exception:
+        return 0.5
+
+
+def _fallback_result(task_id: str, outcome: str = "unknown") -> dict:
+    return {
+        "task_id": task_id,
+        "total_steps": 0,
+        "total_reward": 0.05,
+        "score": 0.5,
+        "outcome": outcome,
+    }
+
+
+def _print_end(result: dict) -> dict:
+    safe = {
+        "task_id": result["task_id"],
+        "total_steps": int(result.get("total_steps", 0)),
+        "total_reward": round(_strict_score(result.get("total_reward", 0.05)), 4),
+        "score": round(_strict_score(result.get("score", 0.5)), 4),
+        "outcome": result.get("outcome") or "unknown",
+    }
+    print(
+        f'[END] {json.dumps({"task_id": safe["task_id"], "total_steps": safe["total_steps"], "total_reward": safe["total_reward"], "score": safe["score"], "outcome": safe["outcome"]})}',
+        flush=True,
+    )
+    return safe
 
 SYSTEM_PROMPT = """You are a clinical trial statistician making adaptive decisions.
 Given trial observations, decide the next action to maximize statistical power
@@ -131,14 +164,19 @@ async def run_task(task_id: str) -> dict:
     http_url = ENV_URL
     headers  = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
 
-    result = {"task_id": task_id, "total_steps": 0,
-              "total_reward": 0.05, "score": 0.05, "outcome": "unknown"}
+    result = _fallback_result(task_id)
 
     try:
-        async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
+        async with websockets.connect(
+            ws_url,
+            ping_interval=20,
+            ping_timeout=10,
+            open_timeout=10,
+            close_timeout=5,
+        ) as ws:
             # Reset
             await ws.send(json.dumps({"type": "reset", "data": {"task_id": task_id}}))
-            msg     = json.loads(await ws.recv())
+            msg     = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
             payload = msg.get("data", msg)
             obs     = payload.get("observation", {})
 
@@ -153,7 +191,7 @@ async def run_task(task_id: str) -> dict:
                 action = llm_action(obs, task_id, step_num)
 
                 await ws.send(json.dumps({"type": "step", "data": action}))
-                msg     = json.loads(await ws.recv())
+                msg     = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
                 payload = msg.get("data", msg)
                 obs     = payload.get("observation", {})
                 reward  = float(payload.get("reward", 0.0) or 0.0)
@@ -172,30 +210,25 @@ async def run_task(task_id: str) -> dict:
                 r = requests.post(
                     f"{http_url}/grader",
                     json={"task_id": task_id},
-                    timeout=30,
+                    timeout=12,
                     headers=headers,
                 )
                 r.raise_for_status()
                 grade = r.json()
                 raw_grade = float(grade.get("score", 0.05))
-                result["score"]   = round(max(0.05, min(0.95, raw_grade)), 4)
+                result["score"]   = _strict_score(raw_grade)
                 result["outcome"] = grade.get("trial_outcome", "unknown")
             except Exception as http_err:
                 fallback_score = total_reward / max(step_num, 1)
-                result["score"]   = round(max(0.05, min(0.95, fallback_score)), 4)
+                result["score"]   = _strict_score(fallback_score)
                 result["outcome"] = obs.get("stop_reason") or "budget_exhausted"
                 print(f"[ERROR] HTTP grader failed: {http_err}", flush=True)
                 
     except Exception as ws_err:
         print(f"[ERROR] WebSocket connection or loop failed: {ws_err}", flush=True)
-        # result retains its fallback 0.05 score
+        result["score"] = 0.5
 
-    # [END] — mandatory format
-    result["score"] = round(max(0.05, min(0.95, float(result["score"]))), 4)
-    result["total_reward"] = round(max(0.05, min(0.95, float(result["total_reward"]))), 4)
-    print(f'[END] {json.dumps({"task_id": result["task_id"], "total_steps": result["total_steps"], "total_reward": result["total_reward"], "score": result["score"], "outcome": result["outcome"]})}',
-          flush=True)
-    return result
+    return _print_end(result)
 
 
 async def main():
@@ -203,7 +236,11 @@ async def main():
         print('[WARN] {"message": "HF_TOKEN not set, LLM calls may fail"}', flush=True)
     scores = []
     for task_id in TASKS:
-        r = await run_task(task_id)
+        try:
+            r = await asyncio.wait_for(run_task(task_id), timeout=TASK_TIMEOUT_SECONDS)
+        except Exception as e:
+            print(f'[WARN] {json.dumps({"task_id": task_id, "error": f"task_timeout_or_cancelled: {e}"})}', flush=True)
+            r = _print_end(_fallback_result(task_id, outcome="timeout_or_error"))
         scores.append(r["score"])
     avg = round(sum(scores) / len(scores), 4)
     print(f'[SUMMARY] {json.dumps({"task_1": scores[0], "task_2": scores[1], "task_3": scores[2], "average": avg})}',

@@ -132,7 +132,7 @@ async def run_task(task_id: str) -> dict:
     headers  = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
 
     result = {"task_id": task_id, "total_steps": 0,
-              "total_reward": 0.0, "score": 0.001, "outcome": "unknown"}
+              "total_reward": 0.0, "score": 0.05, "outcome": "unknown"}
 
     try:
         async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
@@ -177,21 +177,21 @@ async def run_task(task_id: str) -> dict:
                 )
                 r.raise_for_status()
                 grade = r.json()
-                raw_grade = float(grade.get("score", 0.001))
-                result["score"]   = round(max(0.001, min(0.999, raw_grade)), 4)
+                raw_grade = float(grade.get("score", 0.05))
+                result["score"]   = round(max(0.05, min(0.95, raw_grade)), 4)
                 result["outcome"] = grade.get("trial_outcome", "unknown")
             except Exception as http_err:
                 fallback_score = total_reward / max(step_num, 1)
-                result["score"]   = round(max(0.001, min(0.999, fallback_score)), 4)
+                result["score"]   = round(max(0.05, min(0.95, fallback_score)), 4)
                 result["outcome"] = obs.get("stop_reason") or "budget_exhausted"
                 print(f"[ERROR] HTTP grader failed: {http_err}", flush=True)
                 
     except Exception as ws_err:
         print(f"[ERROR] WebSocket connection or loop failed: {ws_err}", flush=True)
-        # result retains its fallback 0.001 score
+        # result retains its fallback 0.05 score
 
     # [END] — mandatory format
-    result["score"] = round(max(0.001, min(0.999, float(result["score"]))), 4)
+    result["score"] = round(max(0.05, min(0.95, float(result["score"]))), 4)
     print(f'[END] {json.dumps({"task_id": result["task_id"], "total_steps": result["total_steps"], "total_reward": result["total_reward"], "score": result["score"], "outcome": result["outcome"]})}',
           flush=True)
     return result

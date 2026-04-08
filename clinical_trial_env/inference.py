@@ -132,7 +132,7 @@ async def run_task(task_id: str) -> dict:
     headers  = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
 
     result = {"task_id": task_id, "total_steps": 0,
-              "total_reward": 0.0, "score": 0.05, "outcome": "unknown"}
+              "total_reward": 0.05, "score": 0.05, "outcome": "unknown"}
 
     try:
         async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
@@ -192,6 +192,7 @@ async def run_task(task_id: str) -> dict:
 
     # [END] — mandatory format
     result["score"] = round(max(0.05, min(0.95, float(result["score"]))), 4)
+    result["total_reward"] = round(max(0.05, min(0.95, float(result["total_reward"]))), 4)
     print(f'[END] {json.dumps({"task_id": result["task_id"], "total_steps": result["total_steps"], "total_reward": result["total_reward"], "score": result["score"], "outcome": result["outcome"]})}',
           flush=True)
     return result

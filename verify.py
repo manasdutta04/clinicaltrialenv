@@ -56,6 +56,29 @@ def _run_http_checks():
         health = requests.get("http://localhost:7860/health", timeout=30)
         print("Health:", health.status_code)
 
+        reset_payload = requests.post(
+            "http://localhost:7860/reset",
+            json={"task_id": "task_1"},
+            timeout=30,
+        ).json()
+        assert "observation" in reset_payload, "/reset must return observation"
+
+        step_payload = {
+            "n_next_cohort": 20,
+            "allocation_control": 0.25,
+            "allocation_low": 0.25,
+            "allocation_mid": 0.25,
+            "allocation_high": 0.25,
+            "stop_for_success": False,
+            "stop_for_futility": False,
+            "drop_arm": None,
+            "inclusion_criteria_strictness": 0.5,
+        }
+        step_result = requests.post("http://localhost:7860/step", json=step_payload, timeout=30).json()
+        assert "observation" in step_result, "/step must return observation"
+        assert "done" in step_result, "/step must return done"
+        _assert_strict_score("step.reward", step_result.get("reward"))
+
         baseline = requests.post("http://localhost:7860/baseline", timeout=60).json()
         scores = []
         for task_id in TASK_IDS:
@@ -71,6 +94,9 @@ def _run_http_checks():
             print(f"Grader {task_id}:", grader)
 
         tasks_response = requests.get("http://localhost:7860/tasks", timeout=30).json()
+        returned_task_ids = {item.get("task_id") for item in tasks_response}
+        assert len(tasks_response) >= 3, "/tasks must include at least 3 tasks"
+        assert set(TASK_IDS).issubset(returned_task_ids), "/tasks missing required task ids"
         assert tasks_response and "action_schema" in tasks_response[0], "action_schema missing in /tasks"
         print("action_schema present:", True)
     finally:

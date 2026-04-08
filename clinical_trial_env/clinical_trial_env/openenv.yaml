@@ -1,0 +1,74 @@
+name: ClinicalTrialEnv
+version: "1.0.0"
+description: >
+  An OpenEnv environment for adaptive clinical trial design optimization.
+  RL agents act as trial statisticians making sequential decisions about
+  patient enrollment, dose allocation, and early stopping to maximize
+  statistical power while minimizing patients used and adverse events.
+  Based on FDA-recognized adaptive trial design methodology (Emax model,
+  Beta-Binomial Bayesian inference, Fisher's exact test).
+author: "Manas Dutta"
+tasks:
+  - id: task_1
+    difficulty: easy
+    description: "Phase II dose-finding — effective drug, clear signal"
+    max_patients: 200
+  - id: task_2
+    difficulty: medium
+    description: "Phase II — efficacy vs safety tradeoff, dangerous high dose"
+    max_patients: 250
+  - id: task_3
+    difficulty: hard
+    description: "Rare disease trial — weak effect, 150 patient budget"
+    max_patients: 150
+action_space:
+  n_next_cohort: {type: int, min: 5, max: 100, description: "Patients in next cohort"}
+  allocation_control: {type: float, min: 0.0, max: 1.0}
+  allocation_low: {type: float, min: 0.0, max: 1.0}
+  allocation_mid: {type: float, min: 0.0, max: 1.0}
+  allocation_high: {type: float, min: 0.0, max: 1.0}
+  stop_for_success: {type: bool}
+  stop_for_futility: {type: bool}
+  drop_arm: {type: categorical, values: [null, low, mid, high]}
+  inclusion_criteria_strictness: {type: float, min: 0.0, max: 1.0, description: "Patient inclusion strictness - 0=relaxed/fast, 1=strict/high-signal"}
+observation_space:
+  interim_number: {type: int}
+  total_patients_enrolled: {type: int}
+  budget_remaining: {type: int}
+  enrollment_rate: {type: float}
+  population_heterogeneity: {type: float}
+  control_response_rate: {type: float}
+  low_response_rate: {type: float}
+  mid_response_rate: {type: float}
+  high_response_rate: {type: float}
+  control_ae_rate: {type: float}
+  low_ae_rate: {type: float}
+  mid_ae_rate: {type: float}
+  high_ae_rate: {type: float}
+  n_control: {type: int}
+  n_low: {type: int}
+  n_mid: {type: int}
+  n_high: {type: int}
+  p_value_low: {type: float}
+  p_value_mid: {type: float}
+  p_value_high: {type: float}
+  prob_low_beats_control: {type: float}
+  prob_mid_beats_control: {type: float}
+  prob_high_beats_control: {type: float}
+  estimated_power: {type: float}
+  low_active: {type: bool}
+  mid_active: {type: bool}
+  high_active: {type: bool}
+  any_arm_significant: {type: bool}
+  futility_flag: {type: bool}
+  stop_reason: {type: str, nullable: true}
+endpoints:
+  reset: "WebSocket /ws"
+  step: "WebSocket /ws"
+  state: "WebSocket /ws"
+  tasks: "GET /tasks"
+  grader: "POST /grader"
+  baseline: "POST /baseline"
+  health: "GET /health"
+  web_ui: "GET /"
+  inference: "python inference.py"

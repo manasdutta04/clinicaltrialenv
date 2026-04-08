@@ -1,0 +1,37 @@
+name: Build and Attach to Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build_and_upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to upload release assets
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install build dependencies
+        run: pip install build
+
+      - name: Build python package
+        run: |
+          cd clinical_trial_env
+          python -m build
+          
+      - name: Upload to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd clinical_trial_env/dist
+          for file in *; do
+            gh release upload ${{ github.event.release.tag_name }} "$file"
+          done

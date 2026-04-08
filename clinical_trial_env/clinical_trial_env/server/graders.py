@@ -4,18 +4,19 @@ from typing import Optional
 
 @dataclass
 class GraderResult:
-    score: float
+    score: float          # always in [0.0, 1.0]
     task_id: str
-    trial_outcome: str
+    trial_outcome: str    # "success" | "futility" | "budget_exhausted" | "safety_stop"
     breakdown: dict
 
 
 def efficacy_grader(session_state: dict) -> GraderResult:
+    """Task 1: Did the trial reach significance? How efficiently?"""
     stop = session_state["stop_reason"]
     enrolled = session_state["total_enrolled"]
     max_p = session_state["task"]["max_patients"]
     best_p = session_state.get("best_pvalue", 1.0)
-    budget_consumed = session_state.get("budget_consumed", enrolled)
+    budget_consumed = session_state.get("budget_consumed", session_state["total_enrolled"])
     efficiency = 1.0 - min(1.0, budget_consumed / max_p)
 
     if stop == "success":
@@ -23,12 +24,12 @@ def efficacy_grader(session_state: dict) -> GraderResult:
     elif stop == "safety_stop":
         score = 0.15
     elif stop == "futility":
-        score = 0.05
-    else:
-        score = 0.30 * max(0.001, 1.0 - best_p / 0.05)
+        score = 0.05  # drug works but agent quit
+    else:  # budget_exhausted
+        score = 0.30 * max(0.0, 1.0 - best_p / 0.05)
 
     return GraderResult(
-        score=float(np.clip(score, 0.001, 0.999)),
+        score=float(np.clip(score, 0.0, 1.0)),
         task_id="task_1",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -37,12 +38,13 @@ def efficacy_grader(session_state: dict) -> GraderResult:
             "max_patients": max_p,
             "efficiency": round(efficiency, 3),
             "best_pvalue": round(best_p, 4),
-            "interims_run": session_state.get("interim_number", 0),
-        },
+            "interims_run": session_state.get("interim_number", 0)
+        }
     )
 
 
 def tradeoff_grader(session_state: dict) -> GraderResult:
+    """Task 2: Efficacy AND safety. Penalize patients given to unsafe arm."""
     stop = session_state["stop_reason"]
     enrolled = session_state["total_enrolled"]
     max_p = session_state["task"]["max_patients"]
@@ -53,26 +55,27 @@ def tradeoff_grader(session_state: dict) -> GraderResult:
         eff = 1.0 - (enrolled / max_p)
         efficacy_score = 0.60 + 0.20 * eff
     else:
-        efficacy_score = 0.25 * max(0.001, 1.0 - best_p / 0.10)
+        efficacy_score = 0.25 * max(0.0, 1.0 - best_p / 0.10)
 
     safety_penalty = min(0.30, unsafe_patients * 0.01)
-    safety_score = max(0.001, 0.40 - safety_penalty)
+    safety_score = max(0.0, 0.40 - safety_penalty)
 
     score = efficacy_score + safety_score
     return GraderResult(
-        score=float(np.clip(score, 0.001, 0.999)),
+        score=float(np.clip(score, 0.0, 1.0)),
         task_id="task_2",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
             "efficacy_score": round(efficacy_score, 3),
             "safety_score": round(safety_score, 3),
             "unsafe_arm_patients": unsafe_patients,
-            "reached_significance": stop == "success",
-        },
+            "reached_significance": stop == "success"
+        }
     )
 
 
 def efficiency_grader(session_state: dict) -> GraderResult:
+    """Task 3: Rare disease — squeeze significance from 150 patients."""
     stop = session_state["stop_reason"]
     enrolled = session_state["total_enrolled"]
     max_p = session_state["task"]["max_patients"]
@@ -80,7 +83,7 @@ def efficiency_grader(session_state: dict) -> GraderResult:
     best_posterior = session_state.get("best_posterior", 0.5)
     patient_eff = 1.0 - min(
         1.0,
-        session_state.get("budget_consumed", enrolled) / max_p,
+        session_state.get("budget_consumed", session_state["total_enrolled"]) / max_p,
     )
 
     if stop == "success":
@@ -88,10 +91,10 @@ def efficiency_grader(session_state: dict) -> GraderResult:
     elif stop == "futility":
         score = 0.20
     else:
-        score = 0.15 + 0.20 * max(0.001, 1.0 - best_p / 0.10)
+        score = 0.15 + 0.20 * max(0.0, 1.0 - best_p / 0.10)
 
     return GraderResult(
-        score=float(np.clip(score, 0.001, 0.999)),
+        score=float(np.clip(score, 0.0, 1.0)),
         task_id="task_3",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -100,6 +103,6 @@ def efficiency_grader(session_state: dict) -> GraderResult:
             "budget": max_p,
             "efficiency": round(patient_eff, 3),
             "best_pvalue": round(best_p, 4),
-            "best_posterior_prob": round(best_posterior, 3),
-        },
+            "best_posterior_prob": round(best_posterior, 3)
+        }
     )

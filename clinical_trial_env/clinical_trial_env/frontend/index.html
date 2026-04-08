@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClinicalTrialEnv Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: #1e293b;
+            --text-color: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-amber: #f59e0b;
+            --border-color: #334155;
+            --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Top Bar */
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: var(--panel-bg);
+            padding: 15px 25px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .title-group {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .title-group h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        .status-badge.active { background-color: rgba(16, 185, 129, 0.2); border: 1px solid var(--accent-green); color: var(--accent-green); }
+        .status-badge.done { background-color: rgba(239, 68, 68, 0.2); border: 1px solid var(--accent-red); color: var(--accent-red); }
+
+        .task-selector {
+            display: flex;
+            gap: 10px;
+        }
+
+        .pill-btn {
+            background-color: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            padding: 8px 16px;
+            border-radius: 9999px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+        }
+
+        .pill-btn:hover {
+            border-color: var(--text-muted);
+        }
+
+        .pill-btn.active {
+            background-color: var(--accent-blue);
+            border-color: var(--accent-blue);
+        }
+
+        .primary-btn {
+            background-color: var(--accent-blue);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .primary-btn:hover { opacity: 0.9; }
+        .danger-btn { background-color: var(--accent-red); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+        .warning-btn { background-color: var(--accent-amber); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; color: #000; }
+
+        .progress-container {
+            width: 200px;
+        }
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.875rem;
+            margin-bottom: 4px;
+            color: var(--text-muted);
+        }
+        .progress-bar-bg {
+            background-color: var(--border-color);
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            background-color: var(--accent-blue);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        /* Metrics Row */
+        .metrics-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+        }
+
+        .metric-card {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .metric-title {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-value {
+            font-size: 1.75rem;
+            font-weight: bold;
+        }
+
+        /* Main Panel */
+        .main-panel {
+            display: grid;
+            grid-template-columns: 2fr 1.5fr;
+            gap: 20px;
+        }
+
+        .panel {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 25px;
+        }
+
+        .panel-title {
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-size: 1.125rem;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+
+        /* Arms View */
+        .arm-row {
+            margin-bottom: 25px;
+        }
+        .arm-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        .arm-dropped {
+            text-decoration: line-through;
+            color: var(--accent-red);
+        }
+        .bar-bg {
+            background-color: var(--border-color);
+            height: 24px;
+            border-radius: 6px;
+            overflow: hidden;
+            position: relative;
+        }
+        .bar-fill {
+            background-color: var(--accent-blue);
+            height: 100%;
+            width: 0%;
+            transition: width 0.4s;
+        }
+        .arm-stats {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-top: 6px;
+        }
+        .ae-warning {
+            color: var(--accent-red);
+            background-color: rgba(239,68,68,0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid var(--accent-red);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+        }
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background-color: rgba(255,255,255,0.03);
+            border-radius: 8px;
+        }
+        .badge {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+        .bg-green { background-color: rgba(16,185,129,0.2); color: var(--accent-green); }
+        .bg-red { background-color: rgba(239,68,68,0.2); color: var(--accent-red); }
+        .bg-amber { background-color: rgba(245,158,11,0.2); color: var(--accent-amber); }
+
+        /* Acton Panel */
+        .action-group {
+            margin-bottom: 20px;
+        }
+        .action-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--accent-blue);
+        }
+        .alloc-sliders {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        .slider-row {
+            display: grid;
+            grid-template-columns: 80px 1fr 50px;
+            align-items: center;
+            gap: 15px;
+        }
+        .action-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        /* Bottom Row */
+        .bottom-row {
+            display: grid;
+            grid-template-columns: 1.5fr 1fr;
+            gap: 20px;
+        }
+        
+        .chart-container {
+            height: 300px;
+            width: 100%;
+        }
+
+        .event-log {
+            height: 300px;
+            overflow-y: auto;
+            background-color: #0f172a;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 0.875rem;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .log-entry { padding: 4px 8px; border-radius: 4px; border-left: 3px solid transparent; }
+        .log-norm { border-left-color: var(--accent-blue); background: rgba(59,130,246,0.1); }
+        .log-succ { border-left-color: var(--accent-green); background: rgba(16,185,129,0.1); }
+        .log-warn { border-left-color: var(--accent-amber); background: rgba(245,158,11,0.1); }
+        .log-crit { border-left-color: var(--accent-red); background: rgba(239,68,68,0.1); }
+
+        /* Score Card Overlay */
+        .overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+        .score-card {
+            background: var(--panel-bg);
+            padding: 40px;
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+        .score-huge {
+            font-size: 5rem;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        .breakdown-table {
+            width: 100%;
+            text-align: left;
+            margin: 25px 0;
+            border-collapse: collapse;
+        }
+        .breakdown-table th, .breakdown-table td {
+            padding: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="top-bar">
+        <div class="title-group">
+            <h1>ClinicalTrialEnv</h1>
+            <span id="env-status" class="status-badge active">Active</span>
+        </div>
+        <div class="task-selector">
+            <button class="pill-btn active" onclick="selectTask('task_1')" id="btn-task_1">Task 1 (Easy)</button>
+            <button class="pill-btn" onclick="selectTask('task_2')" id="btn-task_2">Task 2 (Med)</button>
+            <button class="pill-btn" onclick="selectTask('task_3')" id="btn-task_3">Task 3 (Hard)</button>
+        </div>
+        <div class="title-group">
+            <div class="progress-container">
+                <div class="progress-label">
+                    <span>Patients Enrolled</span>
+                    <span id="progress-text">0 / 0</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="progress-fill"></div>
+                </div>
+            </div>
+            <button class="primary-btn" onclick="newTrial()">New Trial</button>
+        </div>
+    </div>
+
+    <div class="metrics-row">
+        <div class="metric-card">
+            <span class="metric-title">Patients Used</span>
+            <span class="metric-value" id="met-patients">0</span>
+        </div>
+        <div class="metric-card">
+            <span class="metric-title">Best p-value</span>
+            <span class="metric-value" id="met-pval">1.000</span>
+        </div>
+        <div class="metric-card">
+            <span class="metric-title">Max P(arm > ctl)</span>
+            <span class="metric-value" id="met-post">50.0%</span>
+        </div>
+        <div class="metric-card">
+            <span class="metric-title">Estimated Power</span>
+            <span class="metric-value" id="met-power">0.0%</span>
+        </div>
+    </div>
+
+    <div class="main-panel">
+        <div class="panel">
+            <h2 class="panel-title">Response Dashboard</h2>
+            <div id="arms-container">
+                <!-- Rendered in JS -->
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2 class="panel-title">Agent Actions</h2>
+            
+            <div class="action-group">
+                <label>Next Cohort Size: <span id="cohort-val">20</span></label>
+                <input type="range" id="input-cohort" min="5" max="100" value="20" oninput="userHasInteracted = true; document.getElementById('cohort-val').innerText=this.value">
+            </div>
+
+            <div class="action-group" style="margin-top: 15px; margin-bottom: 15px;">
+                <label>Inclusion Strictness: <span id="strictness-val">0.5</span></label>
+                <input type="range" id="input-strictness" min="0" max="1" step="0.05" value="0.5" oninput="userHasInteracted = true; document.getElementById('strictness-val').innerText=this.value">
+                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 4px;">Higher = stronger response, but burns enrollment budget rapidly.</div>
+            </div>
+
+            <label>Allocation Ratios (Auto-normalized)</label>
+            <div class="alloc-sliders">
+                <div class="slider-row"><span>Control</span><input type="range" min="0" max="100" value="25" id="alloc-ctl" oninput="userHasInteracted = true; updateAlloc()"> <span id="val-ctl">25%</span></div>
+                <div class="slider-row"><span>Low</span><input type="range" min="0" max="100" value="25" id="alloc-low" oninput="userHasInteracted = true; updateAlloc()"> <span id="val-low">25%</span></div>
+                <div class="slider-row"><span>Mid</span><input type="range" min="0" max="100" value="25" id="alloc-mid" oninput="userHasInteracted = true; updateAlloc()"> <span id="val-mid">25%</span></div>
+                <div class="slider-row"><span>High</span><input type="range" min="0" max="100" value="25" id="alloc-high" oninput="userHasInteracted = true; updateAlloc()"> <span id="val-high">25%</span></div>
+            </div>
+            <div id="alloc-warn" style="color:var(--accent-red); font-size:0.875rem; display:none;">Sum is 0! Will default to uniform.</div>
+
+            <label>Drop Arm (Optional)</label>
+            <select id="input-drop" style="width:100%; padding:8px; margin-bottom:15px; background:var(--bg-color); color:var(--text-color); border:1px solid var(--border-color); border-radius:4px;">
+                <option value="">None</option>
+                <option value="low">Low Dose</option>
+                <option value="mid">Mid Dose</option>
+                <option value="high">High Dose</option>
+            </select>
+
+            <button class="primary-btn" style="width:100%; margin-bottom:10px;" onclick="runStep(false, false)" id="btn-step">Run Next Interim</button>
+            <div class="action-buttons">
+                <button class="primary-btn" style="background:var(--accent-green);" onclick="runStep(true, false)" id="btn-succ">Stop: Success</button>
+                <button class="warning-btn" onclick="runStep(false, true)" id="btn-fut">Stop: Futility</button>
+            </div>
+            <div class="action-buttons">
+                <button class="primary-btn" style="background:#8b5cf6;" onclick="startAutoRun()" id="btn-auto">Auto-run Heuristic</button>
+                <button id="btn-cancel" class="danger-btn" style="display:none" onclick="isAutoRunning=false; document.getElementById('btn-cancel').style.display='none'; document.getElementById('btn-auto').style.display='inline-block'">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="bottom-row">
+        <div class="panel">
+            <h2 class="panel-title">p-value Trajectory</h2>
+            <div class="chart-container">
+                <canvas id="pvalueChart"></canvas>
+            </div>
+        </div>
+        <div class="panel">
+            <h2 class="panel-title">Trial Event Log</h2>
+            <div class="event-log" id="event-log">
+                <!-- Logs -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="overlay" id="score-overlay">
+    <div class="score-card">
+        <h2 style="margin-top:0;">Episode Complete</h2>
+        <div id="score-badge" class="badge">OUTCOME</div>
+        <div class="score-huge" id="score-val">0.00</div>
+        <p id="score-insight" style="color:#94a3b8;font-size:0.9rem;margin:10px 0"></p>
+        
+        <table class="breakdown-table" id="score-table">
+            <tbody></tbody>
+        </table>
+        
+        <button class="primary-btn" style="width:100%;" onclick="newTrial()">Run Another Trial</button>
+    </div>
+</div>
+
+<script>
+    let ws;
+    let currentTask = "task_1";
+    let lastObservation = null;
+    let chart;
+    let chartData = {
+        labels: [],
+        datasets: [
+            { label: 'Low', data: [], borderColor: '#3b82f6', tension: 0.1 },
+            { label: 'Mid', data: [], borderColor: '#10b981', tension: 0.1 },
+            { label: 'High', data: [], borderColor: '#8b5cf6', tension: 0.1 },
+            {
+                label: 'p=0.05 (significance)',
+                data: [],
+                borderColor: '#ef4444',
+                borderDash: [5,5],
+                borderWidth: 1.5,
+                pointRadius: 0,
+                tension: 0,
+                fill: false
+            }
+        ]
+    };
+    
+    let isAutoRunning = false;
+    let userHasInteracted = false;
+    let maxPatStr = 200;
+
+    function initChart() {
+        const ctx = document.getElementById('pvalueChart').getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { reverse: true, min: 0, max: 1 },
+                    x: { title: { display: true, text: 'Interim Number' } }
+                }
+            }
+        });
+    }
+
+    function initWebSocket() {
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${protocol}//${location.host}/ws`);
+        
+        ws.onopen = () => {
+            logEvent("WebSocket connected", "log-norm");
+            newTrial();
+        };
+
+        ws.onmessage = (event) => {
+            const response = JSON.parse(event.data);
+            const payload = response.data || response; // Handle nested OpenEnv response envelope
+            
+            if (payload.observation) {
+                lastObservation = payload.observation;
+                updateUI(payload.observation, payload.done, payload.reward);
+            } else if (response.type === "error") {
+                logEvent("Error: " + (payload.message || JSON.stringify(payload)), "log-crit");
+            }
+        };
+
+        ws.onclose = () => {
+            logEvent("WebSocket disconnected. Reconnecting in 2s...", "log-crit");
+            setTimeout(initWebSocket, 2000);
+        };
+    }
+
+    function logEvent(msg, cls="log-norm") {
+        const log = document.getElementById('event-log');
+        const div = document.createElement('div');
+        div.className = `log-entry ${cls}`;
+        div.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        log.appendChild(div);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function selectTask(taskId) {
+        currentTask = taskId;
+        document.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(`btn-${taskId}`).classList.add('active');
+        newTrial();
+    }
+
+    function newTrial() {
+        document.getElementById('score-overlay').style.display = 'none';
+        ws.send(JSON.stringify({ type: "reset", data: { task_id: currentTask } }));
+        document.getElementById('event-log').innerHTML = '';
+        logEvent(`Started new trial for ${currentTask}`, "log-norm");
+        isAutoRunning = false;
+        userHasInteracted = false;
+        
+        chartData.labels = [];
+        chartData.datasets.forEach(d => d.data = []);
+        chart.update();
+
+        // Enable UI
+        document.getElementById('btn-step').disabled = false;
+        document.getElementById('btn-succ').disabled = false;
+        document.getElementById('btn-fut').disabled = false;
+        document.getElementById('btn-auto').disabled = false;
+        document.getElementById('btn-auto').style.display = 'inline-block';
+        document.getElementById('btn-cancel').style.display = 'none';
+        
+        document.getElementById('env-status').className = 'status-badge active';
+        document.getElementById('env-status').innerText = 'Active';
+    }
+
+    function updateAlloc() {
+        const c = parseFloat(document.getElementById('alloc-ctl').value);
+        const l = parseFloat(document.getElementById('alloc-low').value);
+        const m = parseFloat(document.getElementById('alloc-mid').value);
+        const h = parseFloat(document.getElementById('alloc-high').value);
+        const t = c+l+m+h;
+        if(t === 0) {
+            document.getElementById('alloc-warn').style.display = userHasInteracted ? 'block' : 'none';
+            return;
+        }
+        document.getElementById('alloc-warn').style.display = 'none';
+        document.getElementById('val-ctl').innerText = Math.round(c/t*100) + "%";
+        document.getElementById('val-low').innerText = Math.round(l/t*100) + "%";
+        document.getElementById('val-mid').innerText = Math.round(m/t*100) + "%";
+        document.getElementById('val-high').innerText = Math.round(h/t*100) + "%";
+    }
+
+    function buildArms(obs) {
+        const cont = document.getElementById('arms-container');
+        cont.innerHTML = '';
+        const maxR = Math.max(obs.control_response_rate, obs.low_response_rate, obs.mid_response_rate, obs.high_response_rate, 0.1);
+        
+        const arms = [
+            { id: 'Control', r: obs.control_response_rate, ae: obs.control_ae_rate, n: obs.n_control, act: true, pval: 1.0, post: '-' },
+            { id: 'Low', r: obs.low_response_rate, ae: obs.low_ae_rate, n: obs.n_low, act: obs.low_active, pval: obs.p_value_low, post: obs.prob_low_beats_control },
+            { id: 'Mid', r: obs.mid_response_rate, ae: obs.mid_ae_rate, n: obs.n_mid, act: obs.mid_active, pval: obs.p_value_mid, post: obs.prob_mid_beats_control },
+            { id: 'High', r: obs.high_response_rate, ae: obs.high_ae_rate, n: obs.n_high, act: obs.high_active, pval: obs.p_value_high, post: obs.prob_high_beats_control }
+        ];
+
+        for(const a of arms) {
+            const w = Math.max(0, (a.r/maxR)*100);
+            const aeWarn = a.ae > 0.20 && a.act ? `<span class="ae-warning">AE: ${(a.ae*100).toFixed(1)}%</span>` : `AE: ${(a.ae*100).toFixed(1)}%`;
+            const nameCls = a.act ? '' : 'arm-dropped';
+            
+            cont.innerHTML += `
+            <div class="arm-row">
+                <div class="arm-header">
+                    <span class="${nameCls}">${a.id} (n=${a.n})</span>
+                    <span>Resp: ${(a.r*100).toFixed(1)}%</span>
+                </div>
+                <div class="bar-bg">
+                    <div class="bar-fill" style="width: ${w}%"></div>
+                </div>
+                <div class="arm-stats">
+                    ${aeWarn}
+                    <span style="color:${a.pval < 0.05 ? 'var(--accent-green)':''}">p=${typeof a.pval==='number'?a.pval.toFixed(3):a.pval} | P(>ctl)=${typeof a.post==='number'?(a.post*100).toFixed(1)+'%':a.post}</span>
+                </div>
+            </div>`;
+        }
+    }
+
+    function updateUI(obs, done, reward) {
+        let maxPat = obs.total_patients_enrolled + obs.budget_remaining;
+        maxPatStr = maxPat;
+        document.getElementById('progress-text').innerText = `${obs.total_patients_enrolled} / ${maxPat}`;
+        document.getElementById('progress-fill').style.width = `${(obs.total_patients_enrolled/maxPat)*100}%`;
+
+        document.getElementById('met-patients').innerText = obs.total_patients_enrolled;
+        const bestP = Math.min(obs.p_value_low, obs.p_value_mid, obs.p_value_high);
+        const pEl = document.getElementById('met-pval');
+        pEl.innerText = bestP.toFixed(4);
+        pEl.style.color = bestP < 0.05 ? 'var(--accent-green)' : (bestP < 0.15 ? 'var(--accent-amber)' : 'var(--text-color)');
+        
+        const bestPost = Math.max(obs.prob_low_beats_control, obs.prob_mid_beats_control, obs.prob_high_beats_control);
+        document.getElementById('met-post').innerText = (bestPost*100).toFixed(1) + "%";
+        document.getElementById('met-power').innerText = (obs.estimated_power*100).toFixed(1) + "%";
+
+        buildArms(obs);
+
+        if(obs.interim_number > 0) {
+            chartData.labels.push(`Int ${obs.interim_number}`);
+            chartData.datasets[0].data.push(obs.p_value_low);
+            chartData.datasets[1].data.push(obs.p_value_mid);
+            chartData.datasets[2].data.push(obs.p_value_high);
+            chartData.datasets[3].data.push(0.05);
+            chart.update();
+        }
+
+        if(obs.any_arm_significant) {
+            logEvent("Statistical significance reached!", "log-succ");
+        }
+        if(obs.futility_flag) {
+            logEvent("Futility flag triggered.", "log-warn");
+        }
+
+        if(done) {
+            document.getElementById('env-status').className = 'status-badge done';
+            document.getElementById('env-status').innerText = 'Done';
+            
+            ['btn-step', 'btn-succ', 'btn-fut', 'btn-auto'].forEach(id => document.getElementById(id).disabled = true);
+            isAutoRunning = false;
+            document.getElementById('btn-auto').style.display = 'inline-block';
+            document.getElementById('btn-cancel').style.display = 'none';
+            
+            logEvent(`Episode terminated. Reason: ${obs.stop_reason}`, "log-crit");
+            setTimeout(fetchGrader, 500);
+        }
+    }
+
+    function runStep(succ, fut) {
+        const c = parseFloat(document.getElementById('alloc-ctl').value);
+        const l = parseFloat(document.getElementById('alloc-low').value);
+        const m = parseFloat(document.getElementById('alloc-mid').value);
+        const h = parseFloat(document.getElementById('alloc-high').value);
+        const t = c+l+m+h;
+        
+        const action = {
+            n_next_cohort: parseInt(document.getElementById('input-cohort').value),
+            allocation_control: t>0 ? c/t : 0.25,
+            allocation_low: t>0 ? l/t : 0.25,
+            allocation_mid: t>0 ? m/t : 0.25,
+            allocation_high: t>0 ? h/t : 0.25,
+            stop_for_success: succ,
+            stop_for_futility: fut,
+            drop_arm: document.getElementById('input-drop').value || null,
+            inclusion_criteria_strictness: parseFloat(document.getElementById('input-strictness').value)
+        };
+        
+        document.getElementById('input-drop').value = "";
+        ws.send(JSON.stringify({ type: "step", data: action }));
+    }
+
+    async function startAutoRun() {
+        if(!lastObservation || isAutoRunning) return;
+        isAutoRunning = true;
+        document.getElementById('btn-auto').style.display = 'none';
+        document.getElementById('btn-cancel').style.display = 'inline-block';
+        
+        while(isAutoRunning && document.getElementById('env-status').innerText !== 'Done') {
+            const obs = lastObservation;
+            
+            const probs = {
+                l: obs.low_active ? obs.prob_low_beats_control : 0,
+                m: obs.mid_active ? obs.prob_mid_beats_control : 0,
+                h: obs.high_active ? obs.prob_high_beats_control : 0
+            };
+            const tp = probs.l + probs.m + probs.h + 0.3;
+            
+            document.getElementById('alloc-ctl').value = (0.3/tp)*100;
+            document.getElementById('alloc-low').value = (probs.l/tp)*100;
+            document.getElementById('alloc-mid').value = (probs.m/tp)*100;
+            document.getElementById('alloc-high').value = (probs.h/tp)*100;
+            updateAlloc();
+            
+            let drop = null;
+            if(obs.low_ae_rate > 0.25 && obs.low_active) drop = "low";
+            else if(obs.mid_ae_rate > 0.25 && obs.mid_active) drop = "mid";
+            else if(obs.high_ae_rate > 0.25 && obs.high_active) drop = "high";
+            document.getElementById('input-drop').value = drop || "";
+            
+            const succ = obs.any_arm_significant && obs.interim_number >= 2;
+            const fut = obs.futility_flag && obs.interim_number >= 2;
+            
+            runStep(succ, fut);
+            await new Promise(r => setTimeout(r, 400));
+        }
+
+        document.getElementById('btn-auto').style.display = 'inline-block';
+        document.getElementById('btn-cancel').style.display = 'none';
+    }
+
+    async function fetchGrader() {
+        try {
+            const res = await fetch('/grader', { method: 'POST' });
+            const grade = await res.json();
+            showScoreOverlay(grade);
+        } catch(e) { console.error(e); }
+    }
+
+    function showScoreOverlay(grade) {
+        const overlay = document.getElementById('score-overlay');
+        const scVal = document.getElementById('score-val');
+        const badge = document.getElementById('score-badge');
+        const insightEl = document.getElementById('score-insight');
+        const table = document.getElementById('score-table').querySelector('tbody');
+        
+        overlay.style.display = 'flex';
+        scVal.innerText = grade.score.toFixed(3);
+        
+        if(grade.score >= 0.7) scVal.style.color = 'var(--accent-green)';
+        else if(grade.score >= 0.4) scVal.style.color = 'var(--accent-amber)';
+        else scVal.style.color = 'var(--accent-red)';
+        
+        badge.innerText = grade.trial_outcome.toUpperCase();
+        if(grade.trial_outcome === 'success') badge.className = 'badge bg-green';
+        else if(grade.trial_outcome === 'safety_stop') badge.className = 'badge bg-red';
+        else badge.className = 'badge bg-amber';
+
+        const enrolled = lastObservation?.total_patients_enrolled ?? '?';
+        const maxP = (lastObservation?.total_patients_enrolled ?? 0) + (lastObservation?.budget_remaining ?? 0);
+        const saved = maxP - (lastObservation?.total_patients_enrolled ?? 0);
+        let insight = '';
+        if (grade.trial_outcome === 'success') {
+            insight = `Agent reached significance using ${enrolled}/${maxP} patients - ${saved} patients saved.`;
+        } else if (grade.trial_outcome === 'futility') {
+            insight = `Correctly stopped early - saved ${saved} patients from unnecessary exposure.`;
+        } else if (grade.trial_outcome === 'safety_stop') {
+            insight = 'Stopped for patient safety - adverse event threshold exceeded.';
+        } else {
+            insight = `Budget exhausted. Best p-value: ${Math.min(lastObservation?.p_value_low ?? 1, lastObservation?.p_value_mid ?? 1, lastObservation?.p_value_high ?? 1).toFixed(4)}`;
+        }
+        insightEl.innerText = insight;
+        
+        table.innerHTML = '';
+        for(const [k, v] of Object.entries(grade.breakdown)) {
+            table.innerHTML += `<tr><th>${k.replace(/_/g,' ')}</th><td>${v}</td></tr>`;
+        }
+    }
+
+    initChart();
+    initWebSocket();
+    updateAlloc();
+</script>
+</body>
+</html>

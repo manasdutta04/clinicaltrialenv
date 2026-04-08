@@ -2,11 +2,25 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
+STRICT_SCORE_MIN = 0.01
+STRICT_SCORE_MAX = 0.99
+
+
+def strict_score(value: float) -> float:
+    """Keep task scores safely inside the open interval (0, 1)."""
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.5
+    if not np.isfinite(numeric):
+        return 0.5
+    return float(np.clip(numeric, STRICT_SCORE_MIN, STRICT_SCORE_MAX))
+
 @dataclass
 class GraderResult:
-    score: float          # always in [0.0, 1.0]
+    score: float
     task_id: str
-    trial_outcome: str    # "success" | "futility" | "budget_exhausted" | "safety_stop"
+    trial_outcome: str
     breakdown: dict
 
 
@@ -24,12 +38,12 @@ def efficacy_grader(session_state: dict) -> GraderResult:
     elif stop == "safety_stop":
         score = 0.15
     elif stop == "futility":
-        score = 0.05  # drug works but agent quit
+        score = 0.05
     else:  # budget_exhausted
-        score = 0.30 * max(0.0, 1.0 - best_p / 0.05)
+        score = 0.30 * max(0.001, 1.0 - best_p / 0.05)
 
     return GraderResult(
-        score=float(np.clip(score, 0.0, 1.0)),
+        score=strict_score(score),
         task_id="task_1",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -55,14 +69,14 @@ def tradeoff_grader(session_state: dict) -> GraderResult:
         eff = 1.0 - (enrolled / max_p)
         efficacy_score = 0.60 + 0.20 * eff
     else:
-        efficacy_score = 0.25 * max(0.0, 1.0 - best_p / 0.10)
+        efficacy_score = 0.25 * max(0.001, 1.0 - best_p / 0.10)
 
     safety_penalty = min(0.30, unsafe_patients * 0.01)
-    safety_score = max(0.0, 0.40 - safety_penalty)
+    safety_score = max(0.001, 0.40 - safety_penalty)
 
     score = efficacy_score + safety_score
     return GraderResult(
-        score=float(np.clip(score, 0.0, 1.0)),
+        score=strict_score(score),
         task_id="task_2",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -91,10 +105,10 @@ def efficiency_grader(session_state: dict) -> GraderResult:
     elif stop == "futility":
         score = 0.20
     else:
-        score = 0.15 + 0.20 * max(0.0, 1.0 - best_p / 0.10)
+        score = 0.15 + 0.20 * max(0.001, 1.0 - best_p / 0.10)
 
     return GraderResult(
-        score=float(np.clip(score, 0.0, 1.0)),
+        score=strict_score(score),
         task_id="task_3",
         trial_outcome=stop or "budget_exhausted",
         breakdown={

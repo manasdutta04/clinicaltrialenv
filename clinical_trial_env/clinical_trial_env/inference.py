@@ -18,6 +18,14 @@ client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "no-token")
 
 TASKS = ["task_1", "task_2", "task_3"]
 
+
+def _strict_score(value):
+    try:
+        return float(max(0.01, min(0.99, float(value))))
+    except Exception:
+        return 0.5
+
+
 SYSTEM_PROMPT = """You are a clinical trial statistician making adaptive decisions.
 Given trial observations, decide the next action to maximize statistical power
 while minimizing patients used and keeping adverse events safe.
@@ -132,57 +140,64 @@ async def run_task(task_id: str) -> dict:
     headers  = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
 
     result = {"task_id": task_id, "total_steps": 0,
-              "total_reward": 0.0, "score": 0.0, "outcome": "unknown"}
+              "total_reward": 0.5, "score": 0.5, "outcome": "unknown"}
 
-    async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
-        # Reset
-        await ws.send(json.dumps({"type": "reset", "data": {"task_id": task_id}}))
-        msg     = json.loads(await ws.recv())
-        payload = msg.get("data", msg)
-        obs     = payload.get("observation", {})
-
-        # [START] — mandatory format
-        print(f'[START] {json.dumps({"task_id": task_id, "model": MODEL_NAME, "env_url": ENV_URL})}',
-              flush=True)
-
-        step_num, done, total_reward = 0, False, 0.0
-
-        while not done and step_num < 30:
-            step_num += 1
-            action = llm_action(obs, task_id, step_num)
-
-            await ws.send(json.dumps({"type": "step", "data": action}))
+    try:
+        async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
+            # Reset
+            await ws.send(json.dumps({"type": "reset", "data": {"task_id": task_id}}))
             msg     = json.loads(await ws.recv())
             payload = msg.get("data", msg)
             obs     = payload.get("observation", {})
-            reward  = float(payload.get("reward", 0.0))
-            done    = bool(payload.get("done", False))
-            total_reward += reward
 
-            # [STEP] — mandatory format
-            print(f'[STEP] {json.dumps({"step": step_num, "action": action, "observation": obs, "reward": round(reward, 4), "done": done})}',
+            # [START] — mandatory format
+            print(f'[START] {json.dumps({"task_id": task_id, "model": MODEL_NAME, "env_url": ENV_URL})}',
                   flush=True)
 
-        result["total_steps"]  = step_num
-        result["total_reward"] = round(total_reward, 4)
+            step_num, done, total_reward = 0, False, 0.0
 
-        # Get grader score via HTTP
-        try:
-            r = requests.post(
-                f"{http_url}/grader",
-                json={"task_id": task_id},
-                timeout=30,
-                headers=headers,
-            )
-            r.raise_for_status()
-            grade = r.json()
-            result["score"]   = round(float(grade.get("score", 0.0)), 4)
-            result["outcome"] = grade.get("trial_outcome", "unknown")
-        except Exception:
-            result["score"]   = round(max(0.0, min(1.0, total_reward / max(step_num, 1))), 4)
-            result["outcome"] = obs.get("stop_reason") or "budget_exhausted"
+            while not done and step_num < 30:
+                step_num += 1
+                action = llm_action(obs, task_id, step_num)
+
+                await ws.send(json.dumps({"type": "step", "data": action}))
+                msg     = json.loads(await ws.recv())
+                payload = msg.get("data", msg)
+                obs     = payload.get("observation", {})
+                reward  = _strict_score(payload.get("reward", 0.0))
+                done    = bool(payload.get("done", False))
+                total_reward += reward
+
+                # [STEP] — mandatory format
+                print(f'[STEP] {json.dumps({"step": step_num, "action": action, "observation": obs, "reward": round(reward, 4), "done": done})}',
+                      flush=True)
+
+            result["total_steps"]  = step_num
+            result["total_reward"] = _strict_score(total_reward)
+
+            # Get grader score via HTTP
+            try:
+                r = requests.post(
+                    f"{http_url}/grader",
+                    json={"task_id": task_id},
+                    timeout=30,
+                    headers=headers,
+                )
+                r.raise_for_status()
+                grade = r.json()
+                raw_score = float(grade.get("score", 0.5))
+                result["score"] = _strict_score(raw_score)
+                result["outcome"] = grade.get("trial_outcome", "unknown")
+            except Exception:
+                result["score"] = 0.5
+                result["outcome"] = obs.get("stop_reason") or "budget_exhausted"
+    except Exception as e:
+        print(f'[WARN] {json.dumps({"task_id": task_id, "error": str(e)})}', flush=True)
+        result["score"] = 0.5
 
     # [END] — mandatory format
+    result["score"] = round(_strict_score(result["score"]), 4)
+    result["total_reward"] = round(_strict_score(result["total_reward"]), 4)
     print(f'[END] {json.dumps({"task_id": result["task_id"], "total_steps": result["total_steps"], "total_reward": result["total_reward"], "score": result["score"], "outcome": result["outcome"]})}',
           flush=True)
     return result

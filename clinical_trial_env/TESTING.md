@@ -36,8 +36,20 @@ Expected behavior:
 - `/health` returns `{"status":"ok","env":"ClinicalTrialEnv","version":"1.0.0"}`
 - `/reset` returns `session_id`, `task`, and an `observation`
 - `/tasks` includes `action_schema`
-- `/baseline` returns per-task scores normalized to `[0.0, 1.0]`
-- `/grader` returns the final normalized score for the most recent completed run
+- `/baseline` returns per-task scores strictly within `(0, 1)` (never `0.0` or `1.0`)
+- `/grader` returns the final score strictly within `(0, 1)` for the most recent completed run
+
+Strict score checks (validator-critical):
+
+```bash
+curl -s -X POST http://127.0.0.1:7860/baseline | python3 -c \
+"import sys,json; d=json.load(sys.stdin); ts=['task_1','task_2','task_3']; s=[d[t]['score'] for t in ts]; print('PASS' if all(0 < x < 1 for x in s) else 'FAIL', s)"
+
+curl -s -X POST http://127.0.0.1:7860/grader \
+  -H "Content-Type: application/json" \
+  -d '{"task_id":"task_1"}' | python3 -c \
+"import sys,json; d=json.load(sys.stdin); s=d.get('score'); print('PASS' if s is not None and 0 < s < 1 else 'FAIL', s)"
+```
 
 ## LLM Agent Check
 
@@ -131,5 +143,5 @@ Before final submission, confirm:
 - stdout uses exact `[START]`, `[STEP]`, and `[END]` prefixes
 - `GET /` returns `200`
 - `GET /tasks` includes `action_schema`
-- `POST /baseline` and `POST /grader` return scores in `[0, 1]`
+- `POST /baseline` and `POST /grader` return scores strictly in `(0, 1)`
 - `openenv.yaml` includes `inclusion_criteria_strictness`, the full observation schema, and `author: "Manas Dutta"`

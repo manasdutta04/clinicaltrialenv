@@ -181,3 +181,10 @@ async def baseline():
     task_scores = [scores[t]["score"] for t in ["task_1", "task_2", "task_3"]]
     scores["average"] = round(sum(task_scores) / 3, 4)
     return scores
+
+def main():
+    import uvicorn
+    uvicorn.run("server.app:app", host="0.0.0.0", port=7860, reload=False)
+
+if __name__ == "__main__":
+    main()

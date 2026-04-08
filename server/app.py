@@ -11,6 +11,7 @@ import numpy as np
 
 from models import TrialAction, TrialObservation
 from .clinical_trial_environment import ClinicalTrialEnvironment
+from .graders import strict_score
 
 app = create_app(
     ClinicalTrialEnvironment,
@@ -74,7 +75,12 @@ async def grader(request: Request):
     else:
         return JSONResponse(status_code=400, content={"error":"No completed episode."})
     result = env_instance.grade()
-    return {"score": float(max(0.001, min(0.999, result.score))), "task_id": result.task_id, "trial_outcome": result.trial_outcome, "breakdown": result.breakdown}
+    return {
+        "score": strict_score(float(result.score)),
+        "task_id": result.task_id,
+        "trial_outcome": result.trial_outcome,
+        "breakdown": result.breakdown,
+    }
 
 @app.post("/reset")
 async def http_reset(body: dict = Body(default={"task": "task_1"})):
@@ -157,7 +163,7 @@ async def baseline():
 
         # Use the actual grader — NOT cumulative reward
         grade_result = env.grade()
-        final_score = float(max(0.001, min(0.999, grade_result.score)))
+        final_score = strict_score(float(grade_result.score))
         _completed_sessions[task_id] = env
 
         scores[task_id] = {

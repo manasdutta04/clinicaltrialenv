@@ -52,7 +52,7 @@ def llm_action(obs, task_id, step_num):
 
 async def run_task(task_id):
     ws_url = ENV_URL.replace("https://","wss://").replace("http://","ws://") + "/ws"
-    result = {"task_id":task_id,"total_steps":0,"total_reward":0.0,"score":0.5,"outcome":"unknown"}
+    result = {"task_id":task_id,"total_steps":0,"total_reward":0.05,"score":0.5,"outcome":"unknown"}
     try:
         async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
             await ws.send(json.dumps({"type":"reset","data":{"task_id":task_id}}))
@@ -69,15 +69,15 @@ async def run_task(task_id):
                 msg    = json.loads(await ws.recv())
                 p      = msg.get("data", msg)
                 obs    = p.get("observation", {})
-                reward = float(p.get("reward", 0.0))
+                reward = float(max(0.01, min(0.99, float(p.get("reward", 0.0)))))
                 done   = bool(p.get("done", False))
                 total_reward += reward
                 print(f'[STEP] {json.dumps({"step":step_num,"action":action,"observation":obs,"reward":round(reward,4),"done":done})}', flush=True)
 
             result["total_steps"]  = step_num
-            result["total_reward"] = round(total_reward, 4)
+            result["total_reward"] = float(max(0.01, min(0.99, total_reward)))
 
-            # Get score from grader — clip to strictly open interval
+            # Get score from grader
             try:
                 headers = {"Authorization":f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
                 r = requests.post(f"{ENV_URL}/grader", json={"task_id":task_id}, timeout=30, headers=headers)
@@ -87,15 +87,17 @@ async def run_task(task_id):
             except Exception:
                 raw_score = 0.5
 
-            # ALWAYS clip to strictly open interval (0,1) — never 0.0 or 1.0
-            score = max(0.001, min(0.999, raw_score))
-            result["score"]   = round(score, 4)
+            result["score"]   = float(max(0.01, min(0.99, raw_score)))
             result["outcome"] = obs.get("stop_reason") or "budget_exhausted"
 
     except Exception as e:
         print(f'[WARN] {json.dumps({"task_id":task_id,"error":str(e)})}', flush=True)
-        result["score"] = 0.5  # safe fallback — never 0.0 or 1.0
+        result["score"] = 0.5
 
+    # FINAL HARDENING: Ensure no field that could be interpreted as a score is 0.0 or 1.0
+    result["score"] = round(float(max(0.01, min(0.99, result["score"]))), 4)
+    result["total_reward"] = round(float(max(0.01, min(0.99, result["total_reward"]))), 4)
+    
     print(f'[END] {json.dumps({"task_id":result["task_id"],"total_steps":result["total_steps"],"total_reward":result["total_reward"],"score":result["score"],"outcome":result["outcome"]})}', flush=True)
     return result
 

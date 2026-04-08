@@ -28,7 +28,7 @@ def efficacy_grader(session_state: dict) -> GraderResult:
         score = 0.30 * max(0.001, 1.0 - best_p / 0.05)
 
     return GraderResult(
-        score=float(np.clip(score, 0.001, 0.999)),
+        score=float(np.clip(score, 0.01, 0.99)),
         task_id="task_1",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -60,7 +60,7 @@ def tradeoff_grader(session_state: dict) -> GraderResult:
 
     score = efficacy_score + safety_score
     return GraderResult(
-        score=float(np.clip(score, 0.001, 0.999)),
+        score=float(np.clip(score, 0.01, 0.99)),
         task_id="task_2",
         trial_outcome=stop or "budget_exhausted",
         breakdown={

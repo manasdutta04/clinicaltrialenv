@@ -12,6 +12,7 @@ import numpy as np
 from models import TrialAction, TrialObservation
 from .clinical_trial_environment import ClinicalTrialEnvironment
 from .graders import strict_score
+from .session_store import _completed_sessions
 
 app = create_app(
     ClinicalTrialEnvironment,
@@ -27,9 +28,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Store last completed env per task so /grader can score it
-_completed_sessions: dict = {}
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 

@@ -8,7 +8,13 @@ STRICT_SCORE_MAX = 0.99
 
 def strict_score(value: float) -> float:
     """Keep every task score strictly inside the open interval (0, 1)."""
-    return float(np.clip(value, STRICT_SCORE_MIN, STRICT_SCORE_MAX))
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.5
+    if not np.isfinite(numeric):
+        return 0.5
+    return float(np.clip(numeric, STRICT_SCORE_MIN, STRICT_SCORE_MAX))
 
 @dataclass
 class GraderResult:

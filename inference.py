@@ -132,7 +132,7 @@ async def run_task(task_id: str) -> dict:
     headers  = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
 
     result = {"task_id": task_id, "total_steps": 0,
-              "total_reward": 0.0, "score": 0.0, "outcome": "unknown"}
+              "total_reward": 0.0, "score": 0.001, "outcome": "unknown"}
 
     async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
         # Reset
@@ -155,7 +155,7 @@ async def run_task(task_id: str) -> dict:
             msg     = json.loads(await ws.recv())
             payload = msg.get("data", msg)
             obs     = payload.get("observation", {})
-            reward  = float(payload.get("reward", 0.0))
+            reward  = float(payload.get("reward", 0.0) or 0.0)
             done    = bool(payload.get("done", False))
             total_reward += reward
 
@@ -176,13 +176,16 @@ async def run_task(task_id: str) -> dict:
             )
             r.raise_for_status()
             grade = r.json()
-            result["score"]   = round(float(grade.get("score", 0.0)), 4)
+            raw_grade = float(grade.get("score", 0.001))
+            result["score"]   = round(max(0.001, min(0.999, raw_grade)), 4)
             result["outcome"] = grade.get("trial_outcome", "unknown")
         except Exception:
-            result["score"]   = round(max(0.0, min(1.0, total_reward / max(step_num, 1))), 4)
+            fallback_score = total_reward / max(step_num, 1)
+            result["score"]   = round(max(0.001, min(0.999, fallback_score)), 4)
             result["outcome"] = obs.get("stop_reason") or "budget_exhausted"
 
     # [END] — mandatory format
+    result["score"] = round(max(0.001, min(0.999, float(result["score"]))), 4)
     print(f'[END] {json.dumps({"task_id": result["task_id"], "total_steps": result["total_steps"], "total_reward": result["total_reward"], "score": result["score"], "outcome": result["outcome"]})}',
           flush=True)
     return result

@@ -25,5 +25,4 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          cd clinical_trial_env
           openenv push --repo-id manasdutta04/clinicaltrialenv

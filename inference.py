@@ -10,6 +10,10 @@ ENV_URL          = os.getenv("ENV_URL", "https://manasdutta04-clinicaltrialenv.h
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "no-token")
 TASKS  = ["task_1", "task_2", "task_3"]
 
+
+def _strict_score(value):
+    return float(max(0.01, min(0.99, float(value))))
+
 def _heuristic(obs):
     probs = {
         "low":  obs.get("prob_low_beats_control",  0.5) if obs.get("low_active",  True) else 0.0,
@@ -69,13 +73,13 @@ async def run_task(task_id):
                 msg    = json.loads(await ws.recv())
                 p      = msg.get("data", msg)
                 obs    = p.get("observation", {})
-                reward = float(max(0.01, min(0.99, float(p.get("reward", 0.0)))))
+                reward = _strict_score(p.get("reward", 0.0))
                 done   = bool(p.get("done", False))
                 total_reward += reward
                 print(f'[STEP] {json.dumps({"step":step_num,"action":action,"observation":obs,"reward":round(reward,4),"done":done})}', flush=True)
 
             result["total_steps"]  = step_num
-            result["total_reward"] = float(max(0.01, min(0.99, total_reward)))
+            result["total_reward"] = _strict_score(total_reward)
 
             # Get score from grader
             try:
@@ -87,7 +91,7 @@ async def run_task(task_id):
             except Exception:
                 raw_score = 0.5
 
-            result["score"]   = float(max(0.01, min(0.99, raw_score)))
+            result["score"]   = _strict_score(raw_score)
             result["outcome"] = obs.get("stop_reason") or "budget_exhausted"
 
     except Exception as e:
@@ -95,8 +99,8 @@ async def run_task(task_id):
         result["score"] = 0.5
 
     # FINAL HARDENING: Ensure no field that could be interpreted as a score is 0.0 or 1.0
-    result["score"] = round(float(max(0.01, min(0.99, result["score"]))), 4)
-    result["total_reward"] = round(float(max(0.01, min(0.99, result["total_reward"]))), 4)
+    result["score"] = round(_strict_score(result["score"]), 4)
+    result["total_reward"] = round(_strict_score(result["total_reward"]), 4)
     
     print(f'[END] {json.dumps({"task_id":result["task_id"],"total_steps":result["total_steps"],"total_reward":result["total_reward"],"score":result["score"],"outcome":result["outcome"]})}', flush=True)
     return result

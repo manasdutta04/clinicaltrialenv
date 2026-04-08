@@ -2,6 +2,14 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
+STRICT_SCORE_MIN = 0.01
+STRICT_SCORE_MAX = 0.99
+
+
+def strict_score(value: float) -> float:
+    """Keep every task score strictly inside the open interval (0, 1)."""
+    return float(np.clip(value, STRICT_SCORE_MIN, STRICT_SCORE_MAX))
+
 @dataclass
 class GraderResult:
     score: float
@@ -28,7 +36,7 @@ def efficacy_grader(session_state: dict) -> GraderResult:
         score = 0.30 * max(0.001, 1.0 - best_p / 0.05)
 
     return GraderResult(
-        score=float(np.clip(score, 0.001, 0.999)),
+        score=strict_score(score),
         task_id="task_1",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -60,7 +68,7 @@ def tradeoff_grader(session_state: dict) -> GraderResult:
 
     score = efficacy_score + safety_score
     return GraderResult(
-        score=float(np.clip(score, 0.001, 0.999)),
+        score=strict_score(score),
         task_id="task_2",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -91,7 +99,7 @@ def efficiency_grader(session_state: dict) -> GraderResult:
         score = 0.15 + 0.20 * max(0.001, 1.0 - best_p / 0.10)
 
     return GraderResult(
-        score=float(np.clip(score, 0.001, 0.999)),
+        score=strict_score(score),
         task_id="task_3",
         trial_outcome=stop or "budget_exhausted",
         breakdown={

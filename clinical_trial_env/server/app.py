@@ -11,6 +11,7 @@ import numpy as np
 
 from models import TrialAction, TrialObservation
 from .clinical_trial_environment import ClinicalTrialEnvironment
+from .graders import strict_score
 
 app = create_app(
     ClinicalTrialEnvironment,
@@ -79,7 +80,7 @@ async def grader(request: Request):
         )
 
     result = env_instance.grade()
-    score = float(np.clip(result.score, 0.001, 0.999))
+    score = strict_score(float(result.score))
     return {
         "score": score,
         "task_id": result.task_id,
@@ -167,7 +168,7 @@ async def baseline():
 
         # Use the actual grader — NOT cumulative reward
         grade_result = env.grade()
-        final_score = float(np.clip(grade_result.score, 0.001, 0.999))
+        final_score = strict_score(float(grade_result.score))
         _completed_sessions[task_id] = env
 
         scores[task_id] = {

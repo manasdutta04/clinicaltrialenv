@@ -22,6 +22,13 @@ app = create_app(
     max_concurrent_envs=10,
 )
 
+# Ensure validator-sensitive HTTP endpoints resolve to the custom handlers below.
+app.router.routes = [
+    route
+    for route in app.router.routes
+    if getattr(route, "path", None) not in {"/reset", "/step", "/health"}
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

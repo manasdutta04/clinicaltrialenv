@@ -3,15 +3,15 @@
 ClinicalTrialEnv inference agent.
 Hackathon mandatory submission file — follows [START]/[STEP]/[END] log format.
 """
-import os, json, asyncio, websockets, requests
+import os, json, asyncio, math, websockets, requests
 from openai import OpenAI
 
 # Mandatory env vars — defaults ONLY for API_BASE_URL and MODEL_NAME
-API_BASE_URL     = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v1/")
-MODEL_NAME       = os.getenv("MODEL_NAME",   "meta-llama/Llama-3.1-8B-Instruct")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v1/")
+MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
 HF_TOKEN = os.getenv("HF_TOKEN")
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")   # optional, no default
-ENV_URL          = os.getenv("ENV_URL", "https://manasdutta04-clinicaltrialenv.hf.space")
+ENV_URL = os.getenv("ENV_URL", "https://manasdutta04-clinicaltrialenv.hf.space")
 
 # OpenAI client using the mandatory variables
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "no-token")
@@ -22,9 +22,12 @@ TASK_TIMEOUT_SECONDS = int(os.getenv("TASK_TIMEOUT_SECONDS", "45"))
 
 def _strict_score(value):
     try:
-        return float(max(0.01, min(0.99, float(value))))
+        numeric = float(value)
     except Exception:
         return 0.5
+    if not math.isfinite(numeric):
+        return 0.5
+    return float(max(0.01, min(0.99, numeric)))
 
 
 def _fallback_result(task_id: str, outcome: str = "unknown") -> dict:

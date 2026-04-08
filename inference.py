@@ -1,11 +1,11 @@
-import os, json, asyncio, websockets, requests
+import os, json, asyncio, math, websockets, requests
 from openai import OpenAI
 
-API_BASE_URL     = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v1/")
-MODEL_NAME       = os.getenv("MODEL_NAME",   "meta-llama/Llama-3.1-8B-Instruct")
-HF_TOKEN         = os.getenv("HF_TOKEN")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v1/")
+MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
+HF_TOKEN = os.getenv("HF_TOKEN")
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
-ENV_URL          = os.getenv("ENV_URL", "https://manasdutta04-clinicaltrialenv.hf.space")
+ENV_URL = os.getenv("ENV_URL", "https://manasdutta04-clinicaltrialenv.hf.space")
 
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "no-token")
 TASKS  = ["task_1", "task_2", "task_3"]
@@ -14,9 +14,12 @@ TASK_TIMEOUT_SECONDS = int(os.getenv("TASK_TIMEOUT_SECONDS", "45"))
 
 def _strict_score(value):
     try:
-        return float(max(0.0001, min(0.9999, float(value))))
+        numeric = float(value)
     except Exception:
         return 0.5
+    if not math.isfinite(numeric):
+        return 0.5
+    return float(max(0.01, min(0.99, numeric)))
 
 
 def _fallback_result(task_id, outcome="unknown"):

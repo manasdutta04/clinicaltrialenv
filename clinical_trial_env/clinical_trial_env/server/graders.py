@@ -2,8 +2,8 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
-STRICT_SCORE_MIN = 0.0001  # Minimum: rounds to 0.0001, never 0.0
-STRICT_SCORE_MAX = 0.9999  # Maximum: rounds to 0.9999, never 1.0
+STRICT_SCORE_MIN = 0.01  # Keep scores safely away from 0.0 after formatting.
+STRICT_SCORE_MAX = 0.99  # Keep scores safely away from 1.0 after formatting.
 
 
 def strict_score(value: float) -> float:

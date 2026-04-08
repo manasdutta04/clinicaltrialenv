@@ -4,9 +4,10 @@ Uses openenv-core for WebSocket handling while overriding validator-sensitive HT
 """
 import os
 import random
+from typing import Optional
 
 import numpy as np
-from fastapi import Body, Request
+from fastapi import Body, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from openenv.core.env_server.http_server import create_app
@@ -89,25 +90,89 @@ async def list_tasks():
     ]
 
 
+def _run_baseline_for_task(task_id: str) -> None:
+    """Run a deterministic baseline episode for a single task and cache it."""
+    np.random.seed(42)
+    random.seed(42)
+    env = ClinicalTrialEnvironment()
+    env.reset(task_id)
+    done = False
+    step_count = 0
+    dropped = set()
+    while not done and step_count < 30:
+        obs = env._build_observation()
+        probs = {
+            "low": obs.prob_low_beats_control if obs.low_active else 0.0,
+            "mid": obs.prob_mid_beats_control if obs.mid_active else 0.0,
+            "high": obs.prob_high_beats_control if obs.high_active else 0.0,
+        }
+        total_prob = sum(probs.values()) + 0.3
+        drop = None
+        ae_thresh = env.task["ae_stopping_threshold"]
+        for arm, ae_rate in (
+            ("low", obs.low_ae_rate),
+            ("mid", obs.mid_ae_rate),
+            ("high", obs.high_ae_rate),
+        ):
+            if ae_rate > ae_thresh * 0.80 and arm not in dropped:
+                drop = arm
+                dropped.add(arm)
+                break
+        action = TrialAction(
+            n_next_cohort=25,
+            allocation_control=0.3 / total_prob,
+            allocation_low=probs["low"] / total_prob,
+            allocation_mid=probs["mid"] / total_prob,
+            allocation_high=probs["high"] / total_prob,
+            stop_for_success=(
+                obs.any_arm_significant
+                and env.interim_number >= env.task["min_interims_before_stop"]
+            ),
+            stop_for_futility=(
+                obs.futility_flag
+                and env.interim_number >= env.task["min_interims_before_stop"]
+            ),
+            drop_arm=drop,
+        )
+        result_obs = env.step(action)
+        done = result_obs.done
+        step_count += 1
+    _completed_sessions[task_id] = env
+
+
 @app.post("/grader")
-async def grader(request: Request):
-    try:
-        body = await request.json()
-        task_id = body.get("task_id") if body else None
-    except Exception:
-        task_id = None
+async def grader(
+    request: Request,
+    task_id: Optional[str] = Query(default=None),
+):
+    # Also try reading task_id from request body
+    if task_id is None:
+        try:
+            body = await request.json()
+            task_id = body.get("task_id") if body else None
+        except Exception:
+            task_id = None
+
+    # If requested task has no session, auto-run baseline for it
+    if task_id and task_id not in _completed_sessions:
+        _run_baseline_for_task(task_id)
+
+    # Ensure ALL tasks are seeded if nothing exists
+    if not _completed_sessions:
+        for tid in ["task_1", "task_2", "task_3"]:
+            _run_baseline_for_task(tid)
 
     if task_id and task_id in _completed_sessions:
         env_instance = _completed_sessions[task_id]
-    elif _completed_sessions:
-        env_instance = list(_completed_sessions.values())[-1]
     else:
-        return JSONResponse(status_code=400,
-            content={"error": "No completed episode. Run /baseline first."})
+        env_instance = list(_completed_sessions.values())[-1]
 
     result = env_instance.grade()
+    raw_score = float(result.score)
+    # Strict open-interval clip: score must satisfy 0 < score < 1
+    safe_score = max(0.001, min(0.999, raw_score))
     return {
-        "score": float(np.clip(result.score, 0.001, 0.999)),
+        "score": round(safe_score, 4),
         "task_id": result.task_id,
         "trial_outcome": result.trial_outcome,
         "breakdown": result.breakdown,

@@ -52,7 +52,7 @@ class TrialStatistics:
         rng = np.random.RandomState(42)
         ctrl_samples = rng.beta(ctrl_post.alpha, ctrl_post.beta, n_samples)
         trt_samples = rng.beta(trt_post.alpha, trt_post.beta, n_samples)
-        return float(np.mean(trt_samples > ctrl_samples))
+        return float(np.clip(np.mean(trt_samples > ctrl_samples), 0.0001, 0.9999))
 
     def compute_pvalue(self, treatment_cohorts: list,
                        control_cohorts: list) -> float:

@@ -2,8 +2,8 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
-STRICT_SCORE_MIN = 1e-6
-STRICT_SCORE_MAX = 1.0 - 1e-6
+STRICT_SCORE_MIN = 0.0001  # Minimum: rounds to 0.0001, never 0.0
+STRICT_SCORE_MAX = 0.9999  # Maximum: rounds to 0.9999, never 1.0
 
 
 def strict_score(value: float) -> float:
@@ -30,10 +30,10 @@ def efficacy_grader(session_state: dict) -> GraderResult:
     max_p = session_state["task"]["max_patients"]
     best_p = session_state.get("best_pvalue", 1.0)
     budget_consumed = session_state.get("budget_consumed", enrolled)
-    efficiency = 1.0 - min(1.0, budget_consumed / max_p)
+    efficiency = 1.0 - min(0.99, budget_consumed / max_p)  # Cap at 0.99 to prevent efficiency=1.0
 
     if stop == "success":
-        score = 0.60 + 0.40 * efficiency
+        score = 0.60 + 0.39 * efficiency  # Reduced from 0.40 to guarantee score < 1.0
     elif stop == "safety_stop":
         score = 0.15
     elif stop == "futility":
@@ -64,8 +64,8 @@ def tradeoff_grader(session_state: dict) -> GraderResult:
     unsafe_patients = session_state.get("unsafe_arm_patients", 0)
 
     if stop == "success":
-        eff = 1.0 - (enrolled / max_p)
-        efficacy_score = 0.60 + 0.20 * eff
+        eff = 1.0 - min(0.99, enrolled / max_p)  # Cap at 0.99
+        efficacy_score = 0.60 + 0.19 * eff  # Reduced from 0.20 to guarantee sum < 1.0
     else:
         efficacy_score = 0.25 * max(0.001, 1.0 - best_p / 0.10)
 
@@ -93,12 +93,12 @@ def efficiency_grader(session_state: dict) -> GraderResult:
     best_p = session_state.get("best_pvalue", 1.0)
     best_posterior = session_state.get("best_posterior", 0.5)
     patient_eff = 1.0 - min(
-        1.0,
+        0.99,  # Cap at 0.99 to prevent patient_eff=1.0
         session_state.get("budget_consumed", enrolled) / max_p,
     )
 
     if stop == "success":
-        score = 0.50 + 0.30 * patient_eff + 0.20 * best_posterior
+        score = 0.50 + 0.29 * patient_eff + 0.19 * best_posterior  # Adjusted coefficients to guarantee score < 1.0
     elif stop == "futility":
         score = 0.20
     else:

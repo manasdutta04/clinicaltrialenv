@@ -14,7 +14,7 @@ TASK_TIMEOUT_SECONDS = int(os.getenv("TASK_TIMEOUT_SECONDS", "45"))
 
 def _strict_score(value):
     try:
-        return float(max(0.01, min(0.99, float(value))))
+        return float(max(0.0001, min(0.9999, float(value))))
     except Exception:
         return 0.5
 

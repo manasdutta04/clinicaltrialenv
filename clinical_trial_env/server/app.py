@@ -170,7 +170,7 @@ async def grader(
     result = env_instance.grade()
     raw_score = float(result.score)
     # Strict open-interval clip: score must satisfy 0 < score < 1
-    safe_score = max(0.05, min(0.95, raw_score))
+    safe_score = max(0.001, min(0.999, raw_score))
     return {
         "score": round(safe_score, 4),
         "task_id": result.task_id,
@@ -237,7 +237,7 @@ async def baseline():
         grade_result = env.grade()
         _completed_sessions[task_id] = env
         scores[task_id] = {
-            "score": round(float(np.clip(grade_result.score, 0.05, 0.95)), 4),
+            "score": round(float(np.clip(grade_result.score, 0.001, 0.999)), 4),
             "stop_reason": env.stop_reason,
             "patients_used": env.total_enrolled,
             "interims": env.interim_number,

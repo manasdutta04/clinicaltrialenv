@@ -2,8 +2,8 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
-STRICT_SCORE_MIN = 0.01
-STRICT_SCORE_MAX = 0.99
+STRICT_SCORE_MIN = 1e-6
+STRICT_SCORE_MAX = 1.0 - 1e-6
 
 
 def strict_score(value: float) -> float:

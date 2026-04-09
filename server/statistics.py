@@ -4,6 +4,9 @@ from scipy.stats import beta as beta_dist
 from dataclasses import dataclass
 from typing import List
 
+OBS_FLOAT_MIN = 0.0001
+OBS_FLOAT_MAX = 0.9999
+
 @dataclass
 class BetaPosterior:
     alpha: float      # 1 + total_responders
@@ -61,17 +64,17 @@ class TrialStatistics:
         Returns p-value. Uses scipy.stats.fisher_exact.
         """
         if not treatment_cohorts or not control_cohorts:
-            return 1.0
+            return OBS_FLOAT_MAX
         trt_r = sum(c.responders for c in treatment_cohorts)
         trt_n = sum(c.n_enrolled for c in treatment_cohorts)
         ctrl_r = sum(c.responders for c in control_cohorts)
         ctrl_n = sum(c.n_enrolled for c in control_cohorts)
         if trt_n == 0 or ctrl_n == 0:
-            return 1.0
+            return OBS_FLOAT_MAX
         table = [[trt_r, trt_n - trt_r],
                  [ctrl_r, ctrl_n - ctrl_r]]
         _, pvalue = stats.fisher_exact(table, alternative='two-sided')
-        return float(pvalue)
+        return float(np.clip(pvalue, OBS_FLOAT_MIN, OBS_FLOAT_MAX))
 
     def compute_power(self, n_per_arm: int,
                       p_treatment: float, p_control: float,
@@ -81,16 +84,16 @@ class TrialStatistics:
         Uses scipy.stats.norm.
         """
         if n_per_arm < 2:
-            return 0.0
+            return OBS_FLOAT_MIN
         effect = abs(p_treatment - p_control)
         p_pooled = (p_treatment + p_control) / 2
         se = np.sqrt(2 * p_pooled * (1 - p_pooled) / n_per_arm)
         if se == 0:
-            return 0.0
+            return OBS_FLOAT_MIN
         z_alpha = stats.norm.ppf(1 - alpha / 2)
         z = effect / se - z_alpha
         power = float(stats.norm.cdf(z))
-        return float(np.clip(power, 0.0, 1.0))
+        return float(np.clip(power, OBS_FLOAT_MIN, OBS_FLOAT_MAX))
 
     def futility_check(self, treatment_cohorts: list,
                        control_cohorts: list,

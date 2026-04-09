@@ -38,20 +38,20 @@ class TrialObservation(Observation):
     interim_number: int = Field(default=0)
     total_patients_enrolled: int = Field(default=0)
     budget_remaining: int = Field(default=0)
-    enrollment_rate: float = Field(default=1.0)
+    enrollment_rate: float = Field(default=0.9999)
     population_heterogeneity: float = Field(default=0.5)
 
     # Per-arm observed response rates
-    control_response_rate: float = Field(default=0.0)
-    low_response_rate: float = Field(default=0.0)
-    mid_response_rate: float = Field(default=0.0)
-    high_response_rate: float = Field(default=0.0)
+    control_response_rate: float = Field(default=0.0001)
+    low_response_rate: float = Field(default=0.0001)
+    mid_response_rate: float = Field(default=0.0001)
+    high_response_rate: float = Field(default=0.0001)
 
     # Per-arm adverse event rates
-    control_ae_rate: float = Field(default=0.0)
-    low_ae_rate: float = Field(default=0.0)
-    mid_ae_rate: float = Field(default=0.0)
-    high_ae_rate: float = Field(default=0.0)
+    control_ae_rate: float = Field(default=0.0001)
+    low_ae_rate: float = Field(default=0.0001)
+    mid_ae_rate: float = Field(default=0.0001)
+    high_ae_rate: float = Field(default=0.0001)
 
     # Per-arm patient counts
     n_control: int = Field(default=0)
@@ -60,9 +60,9 @@ class TrialObservation(Observation):
     n_high: int = Field(default=0)
 
     # Statistical signals (scipy Fisher's exact test)
-    p_value_low: float = Field(default=1.0)
-    p_value_mid: float = Field(default=1.0)
-    p_value_high: float = Field(default=1.0)
+    p_value_low: float = Field(default=0.9999)
+    p_value_mid: float = Field(default=0.9999)
+    p_value_high: float = Field(default=0.9999)
 
     # Bayesian posteriors P(arm > control)
     prob_low_beats_control: float = Field(default=0.5)
@@ -70,7 +70,7 @@ class TrialObservation(Observation):
     prob_high_beats_control: float = Field(default=0.5)
 
     # Power estimate
-    estimated_power: float = Field(default=0.0)
+    estimated_power: float = Field(default=0.0001)
 
     # Active arm flags
     low_active: bool = Field(default=True)

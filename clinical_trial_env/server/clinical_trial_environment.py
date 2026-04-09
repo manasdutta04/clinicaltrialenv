@@ -187,6 +187,9 @@ class ClinicalTrialEnvironment(Environment):
     # ── Internal helpers ───────────────────────────────────────────────────────
 
     def _build_observation(self) -> TrialObservation:
+        def obs_float(value: float) -> float:
+            return round(float(np.clip(value, 0.0001, 0.9999)), 4)
+
         def rate(cohorts):
             r = sum(c.responders for c in cohorts)
             n = sum(c.n_enrolled for c in cohorts)
@@ -228,27 +231,27 @@ class ClinicalTrialEnvironment(Environment):
             interim_number=self.interim_number,
             total_patients_enrolled=self.total_enrolled,
             budget_remaining=int(max(0, self.task["max_patients"] - self.budget_consumed)),
-            enrollment_rate=round(1.0 / self.enroll_cost_multiplier, 4),
-            population_heterogeneity=round(0.05 + ((1.0 - self.last_strictness) * 0.15), 4),
-            control_response_rate=round(rate(ctrl), 4),
-            low_response_rate=round(rate(low), 4),
-            mid_response_rate=round(rate(mid), 4),
-            high_response_rate=round(rate(high), 4),
-            control_ae_rate=round(ae(ctrl), 4),
-            low_ae_rate=round(ae(low), 4),
-            mid_ae_rate=round(ae(mid), 4),
-            high_ae_rate=round(ae(high), 4),
+            enrollment_rate=obs_float(1.0 / self.enroll_cost_multiplier),
+            population_heterogeneity=obs_float(0.05 + ((1.0 - self.last_strictness) * 0.15)),
+            control_response_rate=obs_float(rate(ctrl)),
+            low_response_rate=obs_float(rate(low)),
+            mid_response_rate=obs_float(rate(mid)),
+            high_response_rate=obs_float(rate(high)),
+            control_ae_rate=obs_float(ae(ctrl)),
+            low_ae_rate=obs_float(ae(low)),
+            mid_ae_rate=obs_float(ae(mid)),
+            high_ae_rate=obs_float(ae(high)),
             n_control=count(ctrl),
             n_low=count(low),
             n_mid=count(mid),
             n_high=count(high),
-            p_value_low=round(p_low, 4),
-            p_value_mid=round(p_mid, 4),
-            p_value_high=round(p_high, 4),
-            prob_low_beats_control=round(prob_low, 4),
-            prob_mid_beats_control=round(prob_mid, 4),
-            prob_high_beats_control=round(prob_high, 4),
-            estimated_power=round(power, 4),
+            p_value_low=obs_float(p_low),
+            p_value_mid=obs_float(p_mid),
+            p_value_high=obs_float(p_high),
+            prob_low_beats_control=obs_float(prob_low),
+            prob_mid_beats_control=obs_float(prob_mid),
+            prob_high_beats_control=obs_float(prob_high),
+            estimated_power=obs_float(power),
             low_active="low" not in self.dropped_arms,
             mid_active="mid" not in self.dropped_arms,
             high_active="high" not in self.dropped_arms,

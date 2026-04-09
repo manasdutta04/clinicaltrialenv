@@ -89,6 +89,7 @@ def _run_http_checks():
         ).json()
         assert "observation" in reset_payload, "/reset must return observation"
         _assert_strict_score("reset.observation.reward", reset_payload["observation"].get("reward"))
+        _assert_open_interval_floats("reset.observation", reset_payload["observation"])
 
         step_payload = {
             "n_next_cohort": 20,
@@ -106,6 +107,7 @@ def _run_http_checks():
         assert "done" in step_result, "/step must return done"
         _assert_strict_score("step.reward", step_result.get("reward"))
         _assert_strict_score("step.observation.reward", step_result["observation"].get("reward"))
+        _assert_open_interval_floats("step.observation", step_result["observation"])
 
         baseline = requests.post("http://localhost:7860/baseline", timeout=60).json()
         scores = []
@@ -159,6 +161,10 @@ def _run_inference_checks():
                 task_id = payload.get("task_id")
                 if task_id in TASK_IDS:
                     end_scores[task_id] = payload.get("score")
+            if line.startswith("[STEP] "):
+                payload = json.loads(line[len("[STEP] "):])
+                _assert_open_interval_floats("inference.STEP.observation", payload.get("observation", {}))
+                _assert_strict_score("inference.STEP.reward", payload.get("reward"))
 
         missing = [task_id for task_id in TASK_IDS if task_id not in end_scores]
         if missing:

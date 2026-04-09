@@ -50,7 +50,7 @@ def _run_http_checks():
     import requests
 
     print("Starting server background test...")
-    proc = subprocess.Popen(["uvicorn", "clinical_trial_env.server.app:app", "--port", "7860"])
+    proc = subprocess.Popen(["uvicorn", "server.app:app", "--port", "7860"])
     time.sleep(4)
     try:
         health = requests.get("http://localhost:7860/health", timeout=30)
@@ -62,6 +62,7 @@ def _run_http_checks():
             timeout=30,
         ).json()
         assert "observation" in reset_payload, "/reset must return observation"
+        _assert_strict_score("reset.observation.reward", reset_payload["observation"].get("reward"))
 
         step_payload = {
             "n_next_cohort": 20,
@@ -78,6 +79,7 @@ def _run_http_checks():
         assert "observation" in step_result, "/step must return observation"
         assert "done" in step_result, "/step must return done"
         _assert_strict_score("step.reward", step_result.get("reward"))
+        _assert_strict_score("step.observation.reward", step_result["observation"].get("reward"))
 
         baseline = requests.post("http://localhost:7860/baseline", timeout=60).json()
         scores = []
@@ -106,7 +108,7 @@ def _run_http_checks():
 
 def _run_inference_checks():
     print("Testing inference.py local execution...")
-    proc = subprocess.Popen(["uvicorn", "clinical_trial_env.server.app:app", "--port", "7860"])
+    proc = subprocess.Popen(["uvicorn", "server.app:app", "--port", "7860"])
     time.sleep(4)
     try:
         env = dict(os.environ)

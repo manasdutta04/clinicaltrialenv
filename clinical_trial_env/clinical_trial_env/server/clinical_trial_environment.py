@@ -76,7 +76,7 @@ class ClinicalTrialEnvironment(Environment):
             task_id=task_id,
             budget_remaining=self.task["max_patients"],
             done=False,
-            reward=0.0,
+            reward=0.01,
         )
 
     def step(self, action: TrialAction) -> TrialObservation:
@@ -87,7 +87,7 @@ class ClinicalTrialEnvironment(Environment):
         if not self.episode_active:
             obs = self._build_observation()
             obs.done = True
-            obs.reward = 0.0
+            obs.reward = 0.01
             return obs
 
         # Handle arm drop
@@ -255,7 +255,7 @@ class ClinicalTrialEnvironment(Environment):
             any_arm_significant=any(p < 0.05 for p in [p_low, p_mid, p_high]),
             futility_flag=all_futile,
             done=False,
-            reward=0.0,
+            reward=0.01,
         )
 
     def _mark_completed(self) -> None:

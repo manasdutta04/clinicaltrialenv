@@ -281,6 +281,7 @@ async def http_step(action: TrialAction):
         _completed_sessions.pop(active_key, None)
 
     clamped_reward = float(max(0.01, min(0.99, float(obs.reward))))
+    obs.reward = clamped_reward
     return {
         "observation": obs.model_dump(),
         "reward": clamped_reward,

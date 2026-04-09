@@ -52,7 +52,12 @@ else
   fi
 
   HF_HTTPS_URL="https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}"
-  git push "${HF_HTTPS_URL}" "${ORIGIN_HASH}:refs/heads/${BRANCH}" --force-with-lease=refs/heads/${BRANCH}
+  HF_OLD_HASH="$(git ls-remote "${HF_HTTPS_URL}" "refs/heads/${BRANCH}" | awk '{print $1}')"
+  if [[ -n "${HF_OLD_HASH}" ]]; then
+    git push "${HF_HTTPS_URL}" "${ORIGIN_HASH}:refs/heads/${BRANCH}" "--force-with-lease=refs/heads/${BRANCH}:${HF_OLD_HASH}"
+  else
+    git push "${HF_HTTPS_URL}" "${ORIGIN_HASH}:refs/heads/${BRANCH}" --force
+  fi
   HF_HASH="$(git ls-remote "${HF_HTTPS_URL}" "refs/heads/${BRANCH}" | awk '{print $1}')"
 fi
 

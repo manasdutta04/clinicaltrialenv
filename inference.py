@@ -19,7 +19,7 @@ def _strict_open_score(value, fallback=0.5):
         return float(fallback)
     if numeric != numeric:  # NaN guard
         return float(fallback)
-    return float(max(0.001, min(0.999, numeric)))
+    return float(max(0.01, min(0.95, numeric)))
 
 def _heuristic(obs):
     probs = {

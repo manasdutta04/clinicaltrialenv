@@ -159,7 +159,7 @@ async def http_step(action: TrialAction):
     obs = env.step(action)
     if obs.done:
         _completed_sessions[env.task["task_id"]] = env
-    clamped_reward = float(max(0.01, min(0.99, float(obs.reward))))
+    clamped_reward = float(max(0.01, min(0.95, float(obs.reward))))
     obs.reward = clamped_reward
     return {
         "observation": obs.model_dump(),

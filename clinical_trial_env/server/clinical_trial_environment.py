@@ -291,7 +291,7 @@ class ClinicalTrialEnvironment(Environment):
         sig_bonus = 0.05 if obs.any_arm_significant else 0.0
         reward = 0.02 * best_prob + ae_penalty + sig_bonus
         normalized_reward = 0.5 + reward
-        return float(np.clip(normalized_reward, 0.01, 0.99))
+        return float(np.clip(normalized_reward, 0.01, 0.95))
 
     def grade(self):
         """Run the appropriate task grader."""

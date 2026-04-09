@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 STRICT_SCORE_MIN = 0.01  # Keep scores safely away from 0.0 after formatting.
-STRICT_SCORE_MAX = 0.99  # Keep scores safely away from 1.0 after formatting.
+STRICT_SCORE_MAX = 0.95  # Keep scores comfortably away from 1.0 after formatting.
 BREAKDOWN_FLOAT_MIN = 0.0001
 BREAKDOWN_FLOAT_MAX = 0.9999
 BREAKDOWN_FLOAT_DIGITS = 4

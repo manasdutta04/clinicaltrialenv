@@ -27,7 +27,7 @@ def _strict_score(value):
         return 0.5
     if not math.isfinite(numeric):
         return 0.5
-    return float(max(0.01, min(0.99, numeric)))
+    return float(max(0.01, min(0.95, numeric)))
 
 
 def _fallback_result(task_id: str, outcome: str = "unknown") -> dict:

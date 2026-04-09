@@ -197,7 +197,7 @@ async def run_task(task_id: str) -> dict:
                 msg     = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
                 payload = msg.get("data", msg)
                 obs     = payload.get("observation", {})
-                reward  = float(payload.get("reward", 0.0) or 0.0)
+                reward  = _strict_score(payload.get("reward", 0.0) or 0.0)
                 done    = bool(payload.get("done", False))
                 total_reward += reward
 
@@ -206,7 +206,7 @@ async def run_task(task_id: str) -> dict:
                       flush=True)
 
             result["total_steps"]  = step_num
-            result["total_reward"] = round(total_reward, 4)
+            result["total_reward"] = _strict_score(total_reward)
 
             # Get grader score via HTTP
             try:

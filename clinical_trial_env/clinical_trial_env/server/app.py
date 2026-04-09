@@ -150,13 +150,15 @@ async def grader(request: Request):
     except Exception:
         task_id = None
 
+    valid_task_ids = {"task_1", "task_2", "task_3"}
     if task_id and task_id in _completed_sessions:
         env_instance = _completed_sessions[task_id]
+    elif task_id in valid_task_ids:
+        env_instance = _run_heuristic_episode(task_id)
     elif _completed_sessions:
         env_instance = list(_completed_sessions.values())[-1]
     else:
-        fallback_task = task_id if task_id in {"task_1", "task_2", "task_3"} else "task_1"
-        env_instance = _run_heuristic_episode(fallback_task)
+        env_instance = _run_heuristic_episode("task_1")
 
     result = env_instance.grade()
     return {

@@ -16,6 +16,25 @@ def _assert_strict_score(label, value):
         raise AssertionError(f"{label}={value} is outside strict range (0,1)")
 
 
+def _assert_open_interval_floats(label, value):
+    if isinstance(value, bool) or isinstance(value, int):
+        return
+    if isinstance(value, float):
+        if not (0 < value < 1):
+            raise AssertionError(f"{label}={value} is outside strict range (0,1)")
+        if value in (0.0, 1.0):
+            raise AssertionError(f"{label} must not equal exact boundary float {value}")
+        return
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_label = f"{label}.{key}" if label else key
+            _assert_open_interval_floats(child_label, child)
+        return
+    if isinstance(value, list):
+        for idx, child in enumerate(value):
+            _assert_open_interval_floats(f"{label}[{idx}]", child)
+
+
 def _check_syntax():
     for file_path in ["inference.py", "clinical_trial_env/server/app.py", "clinical_trial_env/server/graders.py"]:
         with open(file_path, "r", encoding="utf-8") as handle:
@@ -56,6 +75,13 @@ def _run_http_checks():
         health = requests.get("http://localhost:7860/health", timeout=30)
         print("Health:", health.status_code)
 
+        for task_id in TASK_IDS:
+            grader = requests.post("http://localhost:7860/grader", json={"task_id": task_id}, timeout=60).json()
+            assert grader.get("task_id") == task_id, f"fresh_grader.{task_id}.task_id mismatch"
+            _assert_strict_score(f"fresh_grader.{task_id}.score", grader.get("score"))
+            _assert_open_interval_floats(f"fresh_grader.{task_id}.breakdown", grader.get("breakdown", {}))
+            print(f"Fresh grader {task_id}:", grader)
+
         reset_payload = requests.post(
             "http://localhost:7860/reset",
             json={"task_id": "task_1"},
@@ -86,13 +112,16 @@ def _run_http_checks():
         for task_id in TASK_IDS:
             score = baseline[task_id]["score"]
             _assert_strict_score(f"baseline.{task_id}.score", score)
+            _assert_open_interval_floats(f"baseline.{task_id}.breakdown", baseline[task_id].get("breakdown", {}))
             scores.append(score)
         print("Baseline scores:", scores)
         print("All in (0,1):", True)
 
         for task_id in TASK_IDS:
             grader = requests.post("http://localhost:7860/grader", json={"task_id": task_id}, timeout=60).json()
+            assert grader.get("task_id") == task_id, f"grader.{task_id}.task_id mismatch"
             _assert_strict_score(f"grader.{task_id}.score", grader.get("score"))
+            _assert_open_interval_floats(f"grader.{task_id}.breakdown", grader.get("breakdown", {}))
             print(f"Grader {task_id}:", grader)
 
         tasks_response = requests.get("http://localhost:7860/tasks", timeout=30).json()

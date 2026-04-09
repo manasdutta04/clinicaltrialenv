@@ -4,6 +4,9 @@ from typing import Optional
 
 STRICT_SCORE_MIN = 0.01  # Keep scores safely away from 0.0 after formatting.
 STRICT_SCORE_MAX = 0.99  # Keep scores safely away from 1.0 after formatting.
+BREAKDOWN_FLOAT_MIN = 0.0001
+BREAKDOWN_FLOAT_MAX = 0.9999
+BREAKDOWN_FLOAT_DIGITS = 4
 
 
 def strict_score(value: float) -> float:
@@ -15,6 +18,22 @@ def strict_score(value: float) -> float:
     if not np.isfinite(numeric):
         return 0.5
     return float(np.clip(numeric, STRICT_SCORE_MIN, STRICT_SCORE_MAX))
+
+
+def serialize_metric(value, digits: int = BREAKDOWN_FLOAT_DIGITS):
+    """Serialize float breakdown metrics without ever emitting exact 0.0 or 1.0."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return value
+    if not np.isfinite(numeric):
+        return round(0.5, digits)
+    clamped = float(np.clip(numeric, BREAKDOWN_FLOAT_MIN, BREAKDOWN_FLOAT_MAX))
+    return round(clamped, digits)
 
 @dataclass
 class GraderResult:
@@ -49,8 +68,8 @@ def efficacy_grader(session_state: dict) -> GraderResult:
             "reached_significance": stop == "success",
             "patients_used": enrolled,
             "max_patients": max_p,
-            "efficiency": round(efficiency, 3),
-            "best_pvalue": round(best_p, 4),
+            "efficiency": serialize_metric(efficiency),
+            "best_pvalue": serialize_metric(best_p),
             "interims_run": session_state.get("interim_number", 0),
         },
     )
@@ -78,8 +97,8 @@ def tradeoff_grader(session_state: dict) -> GraderResult:
         task_id="task_2",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
-            "efficacy_score": round(efficacy_score, 3),
-            "safety_score": round(safety_score, 3),
+            "efficacy_score": serialize_metric(efficacy_score),
+            "safety_score": serialize_metric(safety_score),
             "unsafe_arm_patients": unsafe_patients,
             "reached_significance": stop == "success",
         },
@@ -112,8 +131,8 @@ def efficiency_grader(session_state: dict) -> GraderResult:
             "reached_significance": stop == "success",
             "patients_used": enrolled,
             "budget": max_p,
-            "efficiency": round(patient_eff, 3),
-            "best_pvalue": round(best_p, 4),
-            "best_posterior_prob": round(best_posterior, 3),
+            "efficiency": serialize_metric(patient_eff),
+            "best_pvalue": serialize_metric(best_p),
+            "best_posterior_prob": serialize_metric(best_posterior),
         },
     )

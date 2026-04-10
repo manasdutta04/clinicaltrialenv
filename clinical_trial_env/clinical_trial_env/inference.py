@@ -30,6 +30,38 @@ def _strict_score(value):
     return float(max(0.01, min(0.95, numeric)))
 
 
+def _sanitize_action(action: dict) -> dict:
+    try:
+        numeric_fields = {
+            "allocation_control": float(action.get("allocation_control", 0.25)),
+            "allocation_low": float(action.get("allocation_low", 0.25)),
+            "allocation_mid": float(action.get("allocation_mid", 0.25)),
+            "allocation_high": float(action.get("allocation_high", 0.25)),
+            "inclusion_criteria_strictness": float(action.get("inclusion_criteria_strictness", 0.5)),
+        }
+    except Exception:
+        return _sanitize_action(_heuristic({}))
+
+    for key in ["allocation_control", "allocation_low", "allocation_mid", "allocation_high"]:
+        numeric_fields[key] = _strict_score(numeric_fields[key])
+
+    total = sum(numeric_fields[key] for key in ["allocation_control", "allocation_low", "allocation_mid", "allocation_high"])
+    if total <= 0:
+        total = 1.0
+
+    return {
+        "n_next_cohort": int(max(5, min(100, int(action.get("n_next_cohort", 25))))),
+        "allocation_control": numeric_fields["allocation_control"] / total,
+        "allocation_low": numeric_fields["allocation_low"] / total,
+        "allocation_mid": numeric_fields["allocation_mid"] / total,
+        "allocation_high": numeric_fields["allocation_high"] / total,
+        "stop_for_success": bool(action.get("stop_for_success", False)),
+        "stop_for_futility": bool(action.get("stop_for_futility", False)),
+        "drop_arm": action.get("drop_arm"),
+        "inclusion_criteria_strictness": _strict_score(numeric_fields["inclusion_criteria_strictness"]),
+    }
+
+
 def _fallback_result(task_id: str, outcome: str = "unknown") -> dict:
     return {
         "task_id": task_id,
@@ -192,7 +224,7 @@ async def run_task(task_id: str) -> dict:
 
             while not done and step_num < 30:
                 step_num += 1
-                action = llm_action(obs, task_id, step_num)
+                action = _sanitize_action(llm_action(obs, task_id, step_num))
 
                 await ws.send(json.dumps({"type": "step", "data": action}))
                 msg     = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))

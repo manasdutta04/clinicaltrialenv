@@ -101,3 +101,7 @@ def efficiency_grader(session_state: dict) -> GraderResult:
             "best_posterior_prob": round(best_posterior, 3)
         }
     )
+
+def strict_score(score: float) -> float:
+    """Clamp score to strictly open interval (0, 1)."""
+    return float(np.clip(score, 1e-6, 1.0 - 1e-6))

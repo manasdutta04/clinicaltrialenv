@@ -2,9 +2,17 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
+_SCORE_MIN = 0.02
+_SCORE_MAX = 0.98
+
+def strict_score(score: float) -> float:
+    """Clamp to strictly open (0,1) — safe against float rounding on stdout."""
+    return float(np.clip(score, _SCORE_MIN, _SCORE_MAX))
+
+
 @dataclass
 class GraderResult:
-    score: float  # strictly in (0.0, 1.0)
+    score: float  # strictly in (0.02, 0.98)
     task_id: str
     trial_outcome: str  # "success" | "futility" | "budget_exhausted" | "safety_stop"
     breakdown: dict
@@ -28,7 +36,7 @@ def efficacy_grader(session_state: dict) -> GraderResult:
         score = 0.30 * max(0.0, 1.0 - best_p / 0.05)
 
     return GraderResult(
-        score=float(np.clip(score, 1e-6, 1.0 - 1e-6)),  # ← FIXED
+        score=strict_score(score),
         task_id="task_1",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -61,7 +69,7 @@ def tradeoff_grader(session_state: dict) -> GraderResult:
 
     score = efficacy_score + safety_score
     return GraderResult(
-        score=float(np.clip(score, 1e-6, 1.0 - 1e-6)),  # ← FIXED
+        score=strict_score(score),
         task_id="task_2",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -90,7 +98,7 @@ def efficiency_grader(session_state: dict) -> GraderResult:
         score = 0.15 + 0.20 * max(0.0, 1.0 - best_p / 0.10)
 
     return GraderResult(
-        score=float(np.clip(score, 1e-6, 1.0 - 1e-6)),  # ← FIXED
+        score=strict_score(score),
         task_id="task_3",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -101,7 +109,3 @@ def efficiency_grader(session_state: dict) -> GraderResult:
             "best_posterior_prob": round(best_posterior, 3)
         }
     )
-
-def strict_score(score: float) -> float:
-    """Clamp score to strictly open interval (0, 1)."""
-    return float(np.clip(score, 1e-6, 1.0 - 1e-6))

@@ -12,14 +12,13 @@ def strict_score(score: float) -> float:
 
 @dataclass
 class GraderResult:
-    score: float  # strictly in (0.02, 0.98)
+    score: float
     task_id: str
-    trial_outcome: str  # "success" | "futility" | "budget_exhausted" | "safety_stop"
+    trial_outcome: str
     breakdown: dict
 
 
 def efficacy_grader(session_state: dict) -> GraderResult:
-    """Task 1: Did the trial reach significance? How efficiently?"""
     stop = session_state["stop_reason"]
     enrolled = session_state["total_enrolled"]
     max_p = session_state["task"]["max_patients"]
@@ -32,7 +31,7 @@ def efficacy_grader(session_state: dict) -> GraderResult:
         score = 0.15
     elif stop == "futility":
         score = 0.05
-    else:  # budget_exhausted
+    else:
         score = 0.30 * max(0.0, 1.0 - best_p / 0.05)
 
     return GraderResult(
@@ -51,7 +50,6 @@ def efficacy_grader(session_state: dict) -> GraderResult:
 
 
 def tradeoff_grader(session_state: dict) -> GraderResult:
-    """Task 2: Efficacy AND safety. Penalize patients given to unsafe arm."""
     stop = session_state["stop_reason"]
     enrolled = session_state["total_enrolled"]
     max_p = session_state["task"]["max_patients"]
@@ -82,7 +80,6 @@ def tradeoff_grader(session_state: dict) -> GraderResult:
 
 
 def efficiency_grader(session_state: dict) -> GraderResult:
-    """Task 3: Rare disease — squeeze significance from 150 patients."""
     stop = session_state["stop_reason"]
     enrolled = session_state["total_enrolled"]
     max_p = session_state["task"]["max_patients"]

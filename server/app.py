@@ -166,7 +166,7 @@ async def http_step(action: TrialAction):
 
 @app.post("/baseline")
 async def baseline():
-    """Run heuristic agent for all 3 tasks. Returns grader scores in (0,1)."""
+    """Run a full heuristic episode for all 3 tasks."""
     np.random.seed(42)
     random.seed(42)
     scores = {}
@@ -181,16 +181,14 @@ async def baseline():
         while not done and step_count < 30:
             obs = env._build_observation()
             probs = {
-                "low":  obs.prob_low_beats_control  if obs.low_active  else 0.0,
-                "mid":  obs.prob_mid_beats_control  if obs.mid_active  else 0.0,
+                "low": obs.prob_low_beats_control if obs.low_active else 0.0,
+                "mid": obs.prob_mid_beats_control if obs.mid_active else 0.0,
                 "high": obs.prob_high_beats_control if obs.high_active else 0.0,
             }
             total_prob = sum(probs.values()) + 0.3
             drop = None
             ae_thresh = env.task["ae_stopping_threshold"]
-            for arm, ae_r in [("low", obs.low_ae_rate),
-                               ("mid", obs.mid_ae_rate),
-                               ("high", obs.high_ae_rate)]:
+            for arm, ae_r in [("low", obs.low_ae_rate), ("mid", obs.mid_ae_rate), ("high", obs.high_ae_rate)]:
                 if ae_r > ae_thresh * 0.80 and arm not in dropped:
                     drop = arm
                     dropped.add(arm)
@@ -202,10 +200,8 @@ async def baseline():
                 allocation_low=probs["low"] / total_prob,
                 allocation_mid=probs["mid"] / total_prob,
                 allocation_high=probs["high"] / total_prob,
-                stop_for_success=(obs.any_arm_significant and
-                                  env.interim_number >= env.task["min_interims_before_stop"]),
-                stop_for_futility=(obs.futility_flag and
-                                   env.interim_number >= env.task["min_interims_before_stop"]),
+                stop_for_success=(obs.any_arm_significant and env.interim_number >= env.task["min_interims_before_stop"]),
+                stop_for_futility=(obs.futility_flag and env.interim_number >= env.task["min_interims_before_stop"]),
                 drop_arm=drop,
             )
 
@@ -213,21 +209,18 @@ async def baseline():
             done = result_obs.done
             step_count += 1
 
-        # Use the actual grader — NOT cumulative reward
-        grade_result = env.grade()
-        final_score = strict_score(float(grade_result.score))
-        _completed_sessions[task_id] = env
+        # USE GRADER SCORE, not cumulative reward
+        grader_result = env.grade()
+        task_score = float(grader_result.score)
 
         scores[task_id] = {
-            "score": round(final_score, 4),
+            "score": task_score,
             "stop_reason": env.stop_reason,
             "patients_used": env.total_enrolled,
             "interims": env.interim_number,
-            "breakdown": grade_result.breakdown,
         }
 
-    task_scores = [scores[t]["score"] for t in ["task_1", "task_2", "task_3"]]
-    scores["average"] = round(sum(task_scores) / 3, 4)
+    scores["average"] = round(sum(v["score"] for v in scores.values()) / 3, 4)
     return scores
 
 def main():

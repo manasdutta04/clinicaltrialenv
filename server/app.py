@@ -39,6 +39,25 @@ app.add_middleware(
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
 
+# ── Deep float sanitizer ─────────────────────────────────────────────────────
+def _sanitize_floats(obj):
+    """Recursively clamp every float in a dict/list to (0.0001, 0.9999).
+    Ensures NO float in any HTTP response can be exactly 0.0 or 1.0.
+    Booleans, ints, strings, None are left untouched.
+    """
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, float):
+        if obj != obj:  # NaN
+            return 0.5
+        return float(max(0.0001, min(0.9999, obj)))
+    if isinstance(obj, dict):
+        return {k: _sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_floats(v) for v in obj]
+    return obj
+
+
 def _run_heuristic_episode(task_id: str) -> ClinicalTrialEnvironment:
     """Run one deterministic heuristic episode and persist it for grading."""
     env = ClinicalTrialEnvironment()
@@ -127,12 +146,13 @@ async def grader(request: Request):
         env_instance = _run_heuristic_episode("task_1")
     result = env_instance.grade()
     score = strict_score(float(result.score))
-    return {
+    response = {
         "score": score,
         "task_id": result.task_id,
         "trial_outcome": result.trial_outcome,
         "breakdown": result.breakdown,
     }
+    return _sanitize_floats(response)
 
 @app.post("/reset")
 async def http_reset(body: dict = Body(default={"task": "task_1"})):
@@ -140,11 +160,17 @@ async def http_reset(body: dict = Body(default={"task": "task_1"})):
     env = ClinicalTrialEnvironment()
     obs = env.reset(task_id)
     _completed_sessions[f"http_active_{task_id}"] = env
-    return {
+    try:
+        obs_dict = obs.model_dump()
+    except AttributeError:
+        from dataclasses import asdict
+        obs_dict = asdict(obs)
+    response = {
         "session_id": f"http_{task_id}",
         "task": task_id,
-        "observation": obs.model_dump(),
+        "observation": obs_dict,
     }
+    return _sanitize_floats(response)
 
 @app.post("/step")
 async def http_step(action: TrialAction):
@@ -157,13 +183,19 @@ async def http_step(action: TrialAction):
     obs = env.step(action)
     if obs.done:
         _completed_sessions[env.task["task_id"]] = env
-    clamped_reward = float(max(0.01, min(0.95, float(obs.reward))))
+    clamped_reward = float(max(0.05, min(0.93, float(obs.reward or 0.05))))
     obs.reward = clamped_reward
-    return {
-        "observation": obs.model_dump(),
+    try:
+        obs_dict = obs.model_dump()
+    except AttributeError:
+        from dataclasses import asdict
+        obs_dict = asdict(obs)
+    response = {
+        "observation": obs_dict,
         "reward": clamped_reward,
         "done": bool(obs.done),
     }
+    return _sanitize_floats(response)
 
 @app.post("/baseline")
 async def baseline():
@@ -229,7 +261,7 @@ async def baseline():
 
     task_scores = [scores[t]["score"] for t in ["task_1", "task_2", "task_3"]]
     scores["average"] = round(sum(task_scores) / 3, 4)
-    return scores
+    return _sanitize_floats(scores)
 
 def main():
     import uvicorn

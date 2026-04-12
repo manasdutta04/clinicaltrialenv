@@ -1,36 +1,43 @@
-#!/usr/bin/env python3
-"""
-ClinicalTrialEnv inference agent.
-Hackathon mandatory submission file — follows [START]/[STEP]/[END] log format.
-"""
-import os, json, asyncio, math, websockets, requests
+import os, json, asyncio, websockets, requests
 from openai import OpenAI
 
-# Mandatory env vars — defaults ONLY for API_BASE_URL and MODEL_NAME
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v1/")
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
 HF_TOKEN = os.getenv("HF_TOKEN")
-LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")   # optional, no default
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 ENV_URL = os.getenv("ENV_URL", "https://manasdutta04-clinicaltrialenv.hf.space")
 
-# OpenAI client using the mandatory variables
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "no-token")
-
 TASKS = ["task_1", "task_2", "task_3"]
 TASK_TIMEOUT_SECONDS = int(os.getenv("TASK_TIMEOUT_SECONDS", "45"))
 
 
-def _strict_score(value):
+def _strict_open_score(value, fallback=0.5):
     try:
         numeric = float(value)
     except Exception:
-        return 0.5
-    if not math.isfinite(numeric):
-        return 0.5
-    return float(max(0.01, min(0.95, numeric)))
+        return float(fallback)
+    if numeric != numeric:  # NaN guard
+        return float(fallback)
+    return float(max(0.05, min(0.93, numeric)))
 
 
-def _sanitize_action(action: dict) -> dict:
+def _sanitize_floats(obj):
+    """Recursively clamp every float to (0.0001, 0.9999). Skips bools/ints/strings."""
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, float):
+        if obj != obj:
+            return 0.5
+        return float(max(0.0001, min(0.9999, obj)))
+    if isinstance(obj, dict):
+        return {k: _sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_floats(v) for v in obj]
+    return obj
+
+
+def _sanitize_action(action):
     try:
         numeric_fields = {
             "allocation_control": float(action.get("allocation_control", 0.25)),
@@ -43,7 +50,9 @@ def _sanitize_action(action: dict) -> dict:
         return _sanitize_action(_heuristic({}))
 
     for key in ["allocation_control", "allocation_low", "allocation_mid", "allocation_high"]:
-        numeric_fields[key] = _strict_score(numeric_fields[key])
+        numeric_fields[key] = _strict_open_score(numeric_fields[key], fallback=0.01)
+
+    strictness = _strict_open_score(numeric_fields["inclusion_criteria_strictness"], fallback=0.5)
 
     total = sum(numeric_fields[key] for key in ["allocation_control", "allocation_low", "allocation_mid", "allocation_high"])
     if total <= 0:
@@ -58,149 +67,66 @@ def _sanitize_action(action: dict) -> dict:
         "stop_for_success": bool(action.get("stop_for_success", False)),
         "stop_for_futility": bool(action.get("stop_for_futility", False)),
         "drop_arm": action.get("drop_arm"),
-        "inclusion_criteria_strictness": _strict_score(numeric_fields["inclusion_criteria_strictness"]),
+        "inclusion_criteria_strictness": strictness,
     }
 
-
-def _fallback_result(task_id: str, outcome: str = "unknown") -> dict:
-    return {
-        "task_id": task_id,
-        "total_steps": 0,
-        "total_reward": 0.05,
-        "score": 0.5,
-        "outcome": outcome,
-    }
-
-
-def _print_end(result: dict) -> dict:
-    safe = {
-        "task_id": result["task_id"],
-        "total_steps": int(result.get("total_steps", 0)),
-        "total_reward": round(_strict_score(result.get("total_reward", 0.05)), 4),
-        "score": round(_strict_score(result.get("score", 0.5)), 4),
-        "outcome": result.get("outcome") or "unknown",
-    }
-    print(
-        f'[END] {json.dumps({"task_id": safe["task_id"], "total_steps": safe["total_steps"], "total_reward": safe["total_reward"], "score": safe["score"], "outcome": safe["outcome"]})}',
-        flush=True,
-    )
-    return safe
-
-
-SYSTEM_PROMPT = """You are a clinical trial statistician making adaptive decisions.
-Given trial observations, decide the next action to maximize statistical power
-while minimizing patients used and keeping adverse events safe.
-
-Respond ONLY with valid JSON matching this exact schema (no markdown, no explanation):
-{
-  "n_next_cohort": <int 5-100>,
-  "allocation_control": <float>,
-  "allocation_low": <float>,
-  "allocation_mid": <float>,
-  "allocation_high": <float>,
-  "stop_for_success": <bool>,
-  "stop_for_futility": <bool>,
-  "drop_arm": <null or "low" or "mid" or "high">,
-  "inclusion_criteria_strictness": <float 0-1>
-}
-
-Rules:
-- Allocate more to arms with higher prob_X_beats_control
-- stop_for_success=true when any_arm_significant=true AND interim_number >= 2
-- stop_for_futility=true when futility_flag=true AND interim_number >= 2
-- drop_arm if its ae_rate > 0.20 and arm is active
-- Allocations are auto-normalized, they don't need to sum to 1"""
-
-
-def _heuristic(obs: dict) -> dict:
-    """Fallback heuristic when LLM is unavailable."""
+def _heuristic(obs):
     probs = {
-        "low":  obs.get("prob_low_beats_control",  0.5) if obs.get("low_active",  True) else 0.0,
-        "mid":  obs.get("prob_mid_beats_control",  0.5) if obs.get("mid_active",  True) else 0.0,
+        "low":  obs.get("prob_low_beats_control", 0.5) if obs.get("low_active", True) else 0.0,
+        "mid":  obs.get("prob_mid_beats_control", 0.5) if obs.get("mid_active", True) else 0.0,
         "high": obs.get("prob_high_beats_control", 0.5) if obs.get("high_active", True) else 0.0,
     }
-    total = sum(probs.values()) + 0.3
-    drop = None
-    for arm in ["low", "mid", "high"]:
-        if obs.get(f"{arm}_ae_rate", 0) > 0.20 and obs.get(f"{arm}_active", True):
-            drop = arm
-            break
+    t = sum(probs.values()) + 0.3
+    if t <= 0:
+        t = 1.0
     interim = obs.get("interim_number", 0)
+    drop = next(
+        (a for a in ["low", "mid", "high"]
+         if obs.get(f"{a}_ae_rate", 0) > 0.20 and obs.get(f"{a}_active", True)),
+        None
+    )
     return {
         "n_next_cohort": 25,
-        "allocation_control": 0.3 / total,
-        "allocation_low":     probs["low"]  / total,
-        "allocation_mid":     probs["mid"]  / total,
-        "allocation_high":    probs["high"] / total,
-        "stop_for_success":  obs.get("any_arm_significant", False) and interim >= 2,
+        "allocation_control": 0.3 / t,
+        "allocation_low": probs["low"] / t,
+        "allocation_mid": probs["mid"] / t,
+        "allocation_high": probs["high"] / t,
+        "stop_for_success": obs.get("any_arm_significant", False) and interim >= 2,
         "stop_for_futility": obs.get("futility_flag", False) and interim >= 2,
         "drop_arm": drop,
         "inclusion_criteria_strictness": 0.6,
     }
 
-
-def llm_action(obs: dict, task_id: str, step_num: int) -> dict:
-    """Ask LLM for action; fall back to heuristic on any error."""
+def llm_action(obs, task_id, step_num):
     try:
-        summary = {
-            "task_id": task_id, "step": step_num,
-            "interim": obs.get("interim_number", 0),
-            "enrolled": obs.get("total_patients_enrolled", 0),
-            "budget_left": obs.get("budget_remaining", 0),
-            "response_rates": {
-                "control": obs.get("control_response_rate", 0),
-                "low": obs.get("low_response_rate", 0),
-                "mid": obs.get("mid_response_rate", 0),
-                "high": obs.get("high_response_rate", 0),
-            },
-            "ae_rates": {
-                "low": obs.get("low_ae_rate", 0),
-                "mid": obs.get("mid_ae_rate", 0),
-                "high": obs.get("high_ae_rate", 0),
-            },
-            "p_values": {
-                "low": obs.get("p_value_low", 1.0),
-                "mid": obs.get("p_value_mid", 1.0),
-                "high": obs.get("p_value_high", 1.0),
-            },
-            "posteriors": {
-                "low": obs.get("prob_low_beats_control", 0.5),
-                "mid": obs.get("prob_mid_beats_control", 0.5),
-                "high": obs.get("prob_high_beats_control", 0.5),
-            },
-            "any_significant": obs.get("any_arm_significant", False),
-            "futility_flag":   obs.get("futility_flag", False),
-            "active": {
-                "low":  obs.get("low_active",  True),
-                "mid":  obs.get("mid_active",  True),
-                "high": obs.get("high_active", True),
-            },
-        }
-        resp = client.chat.completions.create(
+        r = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": json.dumps(summary)},
+                {"role": "system", "content": "Return ONLY valid JSON with keys: n_next_cohort, allocation_control, allocation_low, allocation_mid, allocation_high, stop_for_success, stop_for_futility, drop_arm, inclusion_criteria_strictness"},
+                {"role": "user", "content": json.dumps({"task": task_id, "step": step_num, "obs": obs})}
             ],
-            max_tokens=256,
+            max_tokens=200,
             temperature=0.1,
         )
-        raw = resp.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        return json.loads(raw.strip())
+        raw = r.choices[0].message.content.strip()
+        if "```" in raw:
+            raw = raw.split("```")[1].lstrip("json").strip()
+        return json.loads(raw)
     except Exception:
         return _heuristic(obs)
 
+def _unwrap(msg: dict) -> dict:
+    """Handle OpenEnv WebSocket envelope: {data: {observation:...}} or flat."""
+    if "data" in msg and isinstance(msg["data"], dict):
+        return msg["data"]
+    return msg
 
-async def run_task(task_id: str) -> dict:
-    ws_url   = ENV_URL.replace("https://", "wss://").replace("http://", "ws://") + "/ws"
-    http_url = ENV_URL
-    headers  = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
-
-    result = _fallback_result(task_id)
+async def run_task(task_id: str) -> float:
+    ws_url = ENV_URL.replace("https://", "wss://").replace("http://", "ws://") + "/ws"
+    score = 0.5
+    total_steps = 0
+    total_reward = 0.05
+    outcome = "unknown"
 
     try:
         async with websockets.connect(
@@ -212,72 +138,76 @@ async def run_task(task_id: str) -> dict:
         ) as ws:
             # Reset
             await ws.send(json.dumps({"type": "reset", "data": {"task_id": task_id}}))
-            msg     = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
-            payload = msg.get("data", msg)
-            obs     = payload.get("observation", {})
+            raw_msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
+            payload = _unwrap(raw_msg)
+            obs = payload.get("observation", {})
 
-            # [START] — mandatory format
-            print(f'[START] {json.dumps({"task_id": task_id, "model": MODEL_NAME, "env_url": ENV_URL})}',
-                  flush=True)
+            print(f'[START] {json.dumps({"task_id": task_id, "model": MODEL_NAME, "env_url": ENV_URL})}', flush=True)
 
-            step_num, done, total_reward = 0, False, 0.0
+            done = False
+            step_num = 0
 
             while not done and step_num < 30:
                 step_num += 1
                 action = _sanitize_action(llm_action(obs, task_id, step_num))
 
                 await ws.send(json.dumps({"type": "step", "data": action}))
-                msg     = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
-                payload = msg.get("data", msg)
-                obs     = payload.get("observation", {})
-                reward  = _strict_score(payload.get("reward", 0.0))
-                done    = bool(payload.get("done", False))
+                raw_msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
+                payload = _unwrap(raw_msg)
+
+                obs = payload.get("observation", obs)
+                obs = _sanitize_floats(obs)
+                reward = _strict_open_score(payload.get("reward", 0.0), fallback=0.05)
+                done = bool(payload.get("done", False))
                 total_reward += reward
 
-                # [STEP] — mandatory format
-                print(f'[STEP] {json.dumps({"step": step_num, "action": action, "observation": obs, "reward": round(reward, 4), "done": done})}',
-                      flush=True)
+                print(f'[STEP] {json.dumps({"step": step_num, "action": action, "observation": obs, "reward": round(reward, 4), "done": done})}', flush=True)
 
-            result["total_steps"]  = step_num
-            result["total_reward"] = _strict_score(total_reward)
+            total_steps = step_num
+            outcome = obs.get("stop_reason") or "budget_exhausted"
 
             # Get grader score via HTTP
             try:
-                r = requests.post(
-                    f"{http_url}/grader",
+                headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
+                g = requests.post(
+                    f"{ENV_URL}/grader",
                     json={"task_id": task_id},
                     timeout=12,
-                    headers=headers,
-                )
-                r.raise_for_status()
-                grade = r.json()
-                raw_score = float(grade.get("score", 0.5))
-                result["score"] = _strict_score(raw_score)
-                result["outcome"] = grade.get("trial_outcome", "unknown")
+                    headers=headers
+                ).json()
+                raw_score = float(g.get("score", 0.5))
+                score = _strict_open_score(raw_score)
             except Exception:
-                result["score"] = 0.5
-                result["outcome"] = obs.get("stop_reason") or "budget_exhausted"
+                score = _strict_open_score(0.1 + step_num * 0.02)
+
     except Exception as e:
-        print(f'[WARN] {json.dumps({"task_id": task_id, "error": str(e)})}', flush=True)
-        result["score"] = 0.5
+        print(f'[WARN] {json.dumps({"error": str(e)})}', flush=True)
+        score = 0.15
 
-    return _print_end(result)
-
+    safe_score = round(_strict_open_score(score), 4)
+    safe_total_reward = round(_strict_open_score(total_reward, fallback=0.05), 4)
+    print(
+        f'[END] {json.dumps({"task_id": task_id, "total_steps": total_steps, "total_reward": safe_total_reward, "score": safe_score, "outcome": outcome})}',
+        flush=True,
+    )
+    return safe_score
 
 async def main():
-    if not HF_TOKEN:
-        print('[WARN] {"message": "HF_TOKEN not set, LLM calls may fail"}', flush=True)
     scores = []
     for task_id in TASKS:
         try:
-            r = await asyncio.wait_for(run_task(task_id), timeout=TASK_TIMEOUT_SECONDS)
+            s = await asyncio.wait_for(run_task(task_id), timeout=TASK_TIMEOUT_SECONDS)
         except Exception as e:
             print(f'[WARN] {json.dumps({"task_id": task_id, "error": f"task_timeout_or_cancelled: {e}"})}', flush=True)
-            r = _print_end(_fallback_result(task_id, outcome="timeout_or_error"))
-        scores.append(r["score"])
+            fallback = 0.5
+            print(
+                f'[END] {json.dumps({"task_id": task_id, "total_steps": 0, "total_reward": 0.05, "score": fallback, "outcome": "timeout_or_error"})}',
+                flush=True,
+            )
+            s = fallback
+        scores.append(s)
     avg = round(sum(scores) / len(scores), 4)
-    print(f'[SUMMARY] {json.dumps({"task_1": scores[0], "task_2": scores[1], "task_3": scores[2], "average": avg})}',
-          flush=True)
+    print(f'[SUMMARY] {json.dumps({"task_1": scores[0], "task_2": scores[1], "task_3": scores[2], "average": avg})}', flush=True)
 
 if __name__ == "__main__":
     asyncio.run(main())

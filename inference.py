@@ -19,7 +19,22 @@ def _strict_open_score(value, fallback=0.5):
         return float(fallback)
     if numeric != numeric:  # NaN guard
         return float(fallback)
-    return float(max(0.01, min(0.95, numeric)))
+    return float(max(0.05, min(0.93, numeric)))
+
+
+def _sanitize_floats(obj):
+    """Recursively clamp every float to (0.0001, 0.9999). Skips bools/ints/strings."""
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, float):
+        if obj != obj:
+            return 0.5
+        return float(max(0.0001, min(0.9999, obj)))
+    if isinstance(obj, dict):
+        return {k: _sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_floats(v) for v in obj]
+    return obj
 
 
 def _sanitize_action(action):
@@ -141,7 +156,8 @@ async def run_task(task_id: str) -> float:
                 payload = _unwrap(raw_msg)
 
                 obs = payload.get("observation", obs)
-                reward = _strict_open_score(payload.get("reward", 0.0), fallback=0.001)
+                obs = _sanitize_floats(obs)
+                reward = _strict_open_score(payload.get("reward", 0.0), fallback=0.05)
                 done = bool(payload.get("done", False))
                 total_reward += reward
 

@@ -111,12 +111,12 @@ def _latest_completed_session():
 
 @app.get("/")
 async def root():
-    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/dashboard")
 async def serve_dashboard():
-    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+    return {"message": "ClinicalTrialEnv API is running. No frontend dashboard available."}
 
 
 @app.get("/health")

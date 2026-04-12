@@ -2,10 +2,10 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
-STRICT_SCORE_MIN = 0.05  # Keep scores safely away from 0.0 after formatting.
-STRICT_SCORE_MAX = 0.93  # Keep scores comfortably away from 1.0 after formatting.
-BREAKDOWN_FLOAT_MIN = 0.0001
-BREAKDOWN_FLOAT_MAX = 0.9999
+STRICT_SCORE_MIN = 0.10  # Very safe margin from 0.0
+STRICT_SCORE_MAX = 0.90  # Very safe margin from 1.0
+BREAKDOWN_FLOAT_MIN = 0.001
+BREAKDOWN_FLOAT_MAX = 0.999
 BREAKDOWN_FLOAT_DIGITS = 4
 
 
@@ -24,8 +24,8 @@ def serialize_metric(value, digits: int = BREAKDOWN_FLOAT_DIGITS):
     """Serialize float breakdown metrics without ever emitting exact 0.0 or 1.0."""
     if isinstance(value, bool):
         return value
-    if isinstance(value, int):
-        return value
+    if isinstance(value, (int, np.integer)):
+        return int(value)
     try:
         numeric = float(value)
     except (TypeError, ValueError):
@@ -34,6 +34,24 @@ def serialize_metric(value, digits: int = BREAKDOWN_FLOAT_DIGITS):
         return round(0.5, digits)
     clamped = float(np.clip(numeric, BREAKDOWN_FLOAT_MIN, BREAKDOWN_FLOAT_MAX))
     return round(clamped, digits)
+
+
+def _deep_sanitize(obj):
+    """Recursively clamp every float to (0.001, 0.999) including numpy types."""
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, (float, np.floating)):
+        if not np.isfinite(obj):
+            return 0.5
+        # Force conversion to python float to avoid numpy-specific serialization issues
+        return float(np.clip(obj, 0.001, 0.999))
+    if isinstance(obj, (int, np.integer)):
+        return int(obj)
+    if isinstance(obj, dict):
+        return {k: _deep_sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_deep_sanitize(v) for v in obj]
+    return obj
 
 
 @dataclass

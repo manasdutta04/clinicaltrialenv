@@ -2,15 +2,15 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
-STRICT_SCORE_MIN = 0.05  # Keep scores safely away from 0.0 after formatting.
-STRICT_SCORE_MAX = 0.93  # Keep scores comfortably away from 1.0 after formatting.
-BREAKDOWN_FLOAT_MIN = 0.0001
-BREAKDOWN_FLOAT_MAX = 0.9999
+STRICT_SCORE_MIN = 0.10  # Very safe margin from 0.0
+STRICT_SCORE_MAX = 0.90  # Very safe margin from 1.0
+BREAKDOWN_FLOAT_MIN = 0.001
+BREAKDOWN_FLOAT_MAX = 0.999
 BREAKDOWN_FLOAT_DIGITS = 4
 
 
 def strict_score(value: float) -> float:
-    """Keep task scores safely inside the open interval (0, 1)."""
+    """Keep every task score strictly inside the open interval (0, 1)."""
     try:
         numeric = float(value)
     except (TypeError, ValueError):
@@ -24,8 +24,8 @@ def serialize_metric(value, digits: int = BREAKDOWN_FLOAT_DIGITS):
     """Serialize float breakdown metrics without ever emitting exact 0.0 or 1.0."""
     if isinstance(value, bool):
         return value
-    if isinstance(value, int):
-        return value
+    if isinstance(value, (int, np.integer)):
+        return int(value)
     try:
         numeric = float(value)
     except (TypeError, ValueError):
@@ -34,6 +34,25 @@ def serialize_metric(value, digits: int = BREAKDOWN_FLOAT_DIGITS):
         return round(0.5, digits)
     clamped = float(np.clip(numeric, BREAKDOWN_FLOAT_MIN, BREAKDOWN_FLOAT_MAX))
     return round(clamped, digits)
+
+
+def _deep_sanitize(obj):
+    """Recursively clamp every float to (0.001, 0.999) including numpy types."""
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, (float, np.floating)):
+        if not np.isfinite(obj):
+            return 0.5
+        # Force conversion to python float to avoid numpy-specific serialization issues
+        return float(np.clip(obj, 0.001, 0.999))
+    if isinstance(obj, (int, np.integer)):
+        return int(obj)
+    if isinstance(obj, dict):
+        return {k: _deep_sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_deep_sanitize(v) for v in obj]
+    return obj
+
 
 @dataclass
 class GraderResult:
@@ -44,21 +63,20 @@ class GraderResult:
 
 
 def efficacy_grader(session_state: dict) -> GraderResult:
-    """Task 1: Did the trial reach significance? How efficiently?"""
     stop = session_state["stop_reason"]
     enrolled = session_state["total_enrolled"]
     max_p = session_state["task"]["max_patients"]
     best_p = session_state.get("best_pvalue", 1.0)
-    budget_consumed = session_state.get("budget_consumed", session_state["total_enrolled"])
-    efficiency = 1.0 - min(0.99, budget_consumed / max_p)  # Cap at 0.99 to prevent efficiency=1.0
+    budget_consumed = session_state.get("budget_consumed", enrolled)
+    efficiency = 1.0 - min(0.99, budget_consumed / max_p)
 
     if stop == "success":
-        score = 0.60 + 0.39 * efficiency  # Reduced from 0.40 to guarantee score < 1.0
+        score = 0.60 + 0.39 * efficiency
     elif stop == "safety_stop":
         score = 0.15
     elif stop == "futility":
         score = 0.05
-    else:  # budget_exhausted
+    else:
         score = 0.30 * max(0.001, 1.0 - best_p / 0.05)
 
     return GraderResult(
@@ -71,13 +89,12 @@ def efficacy_grader(session_state: dict) -> GraderResult:
             "max_patients": max_p,
             "efficiency": serialize_metric(efficiency),
             "best_pvalue": serialize_metric(best_p),
-            "interims_run": session_state.get("interim_number", 0)
-        }
+            "interims_run": session_state.get("interim_number", 0),
+        },
     )
 
 
 def tradeoff_grader(session_state: dict) -> GraderResult:
-    """Task 2: Efficacy AND safety. Penalize patients given to unsafe arm."""
     stop = session_state["stop_reason"]
     enrolled = session_state["total_enrolled"]
     max_p = session_state["task"]["max_patients"]
@@ -85,8 +102,8 @@ def tradeoff_grader(session_state: dict) -> GraderResult:
     unsafe_patients = session_state.get("unsafe_arm_patients", 0)
 
     if stop == "success":
-        eff = 1.0 - min(0.99, enrolled / max_p)  # Cap at 0.99
-        efficacy_score = 0.60 + 0.19 * eff  # Reduced from 0.20 to guarantee sum < 1.0
+        eff = 1.0 - min(0.99, enrolled / max_p)
+        efficacy_score = 0.60 + 0.19 * eff
     else:
         efficacy_score = 0.25 * max(0.001, 1.0 - best_p / 0.10)
 
@@ -102,25 +119,24 @@ def tradeoff_grader(session_state: dict) -> GraderResult:
             "efficacy_score": serialize_metric(efficacy_score),
             "safety_score": serialize_metric(safety_score),
             "unsafe_arm_patients": unsafe_patients,
-            "reached_significance": stop == "success"
-        }
+            "reached_significance": stop == "success",
+        },
     )
 
 
 def efficiency_grader(session_state: dict) -> GraderResult:
-    """Task 3: Rare disease — squeeze significance from 150 patients."""
     stop = session_state["stop_reason"]
     enrolled = session_state["total_enrolled"]
     max_p = session_state["task"]["max_patients"]
     best_p = session_state.get("best_pvalue", 1.0)
     best_posterior = session_state.get("best_posterior", 0.5)
     patient_eff = 1.0 - min(
-        0.99,  # Cap at 0.99 to prevent patient_eff=1.0
-        session_state.get("budget_consumed", session_state["total_enrolled"]) / max_p,
+        0.99,
+        session_state.get("budget_consumed", enrolled) / max_p,
     )
 
     if stop == "success":
-        score = 0.50 + 0.29 * patient_eff + 0.19 * best_posterior  # Adjusted coefficients to guarantee score < 1.0
+        score = 0.50 + 0.29 * patient_eff + 0.19 * best_posterior
     elif stop == "futility":
         score = 0.20
     else:
@@ -136,6 +152,6 @@ def efficiency_grader(session_state: dict) -> GraderResult:
             "budget": max_p,
             "efficiency": serialize_metric(patient_eff),
             "best_pvalue": serialize_metric(best_p),
-            "best_posterior_prob": serialize_metric(best_posterior)
-        }
+            "best_posterior_prob": serialize_metric(best_posterior),
+        },
     )

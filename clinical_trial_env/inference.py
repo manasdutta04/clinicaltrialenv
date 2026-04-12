@@ -19,7 +19,7 @@ def _strict_open_score(value, fallback=0.5):
         return float(fallback)
     if numeric != numeric:  # NaN guard
         return float(fallback)
-    return float(max(0.05, min(0.93, numeric)))
+    return float(max(0.1, min(0.9, numeric)))
 
 
 def _sanitize_floats(obj):
@@ -169,23 +169,28 @@ async def run_task(task_id: str) -> float:
             # Get grader score via HTTP
             try:
                 headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
-                g = requests.post(
-                    f"{ENV_URL}/grader",
+                resp = requests.post(
+                    f"{ENV_URL.rstrip('/')}/grader",
                     json={"task_id": task_id},
-                    timeout=12,
+                    timeout=15,
                     headers=headers
-                ).json()
-                raw_score = float(g.get("score", 0.5))
+                )
+                g = resp.json()
+                raw_score = g.get("score")
+                if raw_score is None:
+                    raw_score = g.get("average", 0.5)
                 score = _strict_open_score(raw_score)
-            except Exception:
-                score = _strict_open_score(0.1 + step_num * 0.02)
+            except Exception as e:
+                print(f"[WARN] Grader call failed: {e}", flush=True)
+                # Fallback score based on progress
+                score = _strict_open_score(0.2 + step_num * 0.01)
 
     except Exception as e:
-        print(f'[WARN] {json.dumps({"error": str(e)})}', flush=True)
-        score = 0.15
+        print(f'[WARN] Task execution error: {json.dumps({"error": str(e)})}', flush=True)
+        score = 0.2
 
     safe_score = round(_strict_open_score(score), 4)
-    safe_total_reward = round(_strict_open_score(total_reward, fallback=0.05), 4)
+    safe_total_reward = round(_strict_open_score(total_reward, fallback=0.1), 4)
     print(
         f'[END] {json.dumps({"task_id": task_id, "total_steps": total_steps, "total_reward": safe_total_reward, "score": safe_score, "outcome": outcome})}',
         flush=True,

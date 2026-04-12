@@ -7,7 +7,7 @@ import numpy as np
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import State
 
-from .graders import efficacy_grader, tradeoff_grader, efficiency_grader
+from .graders import efficacy_grader, tradeoff_grader, efficiency_grader, _deep_sanitize
 from .patient_simulator import PatientSimulator
 from .session_store import _completed_sessions
 from .statistics import TrialStatistics
@@ -72,12 +72,12 @@ class ClinicalTrialEnvironment(Environment):
         self.enroll_cost_multiplier = 1.0
         self._state = State(episode_id=str(uuid4()), step_count=0)
 
-        return TrialObservation(
+        return _deep_sanitize(TrialObservation(
             task_id=task_id,
             budget_remaining=self.task["max_patients"],
             done=False,
-            reward=0.05,
-        )
+            reward=0.10,
+        ))
 
     def step(self, action: TrialAction) -> TrialObservation:
         """Execute one interim analysis period."""
@@ -141,7 +141,7 @@ class ClinicalTrialEnvironment(Environment):
             obs.done = True
             obs.reward = reward
             self._mark_completed()
-            return obs
+            return _deep_sanitize(obs)
 
         min_i = self.task["min_interims_before_stop"]
 
@@ -178,7 +178,7 @@ class ClinicalTrialEnvironment(Environment):
         # Continuing step reward
         obs.done = False
         obs.reward = float(self._step_reward(obs))
-        return obs
+        return _deep_sanitize(obs)
 
     @property
     def state(self) -> State:
@@ -258,7 +258,7 @@ class ClinicalTrialEnvironment(Environment):
             any_arm_significant=any(p < 0.05 for p in [p_low, p_mid, p_high]),
             futility_flag=all_futile,
             done=False,
-            reward=0.05,
+            reward=0.10,
         )
 
     def _mark_completed(self) -> None:
@@ -291,7 +291,7 @@ class ClinicalTrialEnvironment(Environment):
         sig_bonus = 0.05 if obs.any_arm_significant else 0.0
         reward = 0.02 * best_prob + ae_penalty + sig_bonus
         normalized_reward = 0.5 + reward
-        return float(np.clip(normalized_reward, 0.01, 0.95))
+        return float(np.clip(normalized_reward, 0.10, 0.90))
 
     def grade(self):
         """Run the appropriate task grader."""

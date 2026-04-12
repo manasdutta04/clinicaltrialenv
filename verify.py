@@ -69,7 +69,7 @@ def _run_http_checks():
     import requests
 
     print("Starting server background test...")
-    proc = subprocess.Popen(["uvicorn", "server.app:app", "--port", "7860"])
+    proc = subprocess.Popen(["python3", "-m", "uvicorn", "server.app:app", "--port", "7860"])
     time.sleep(4)
     try:
         health = requests.get("http://localhost:7860/health", timeout=30)
@@ -139,7 +139,7 @@ def _run_http_checks():
 
 def _run_inference_checks():
     print("Testing inference.py local execution...")
-    proc = subprocess.Popen(["uvicorn", "server.app:app", "--port", "7860"])
+    proc = subprocess.Popen(["python3", "-m", "uvicorn", "server.app:app", "--port", "7860"])
     time.sleep(4)
     try:
         env = dict(os.environ)

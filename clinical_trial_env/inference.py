@@ -190,7 +190,10 @@ async def run_task(task_id: str) -> float:
         score = 0.2
 
     safe_score = round(_strict_open_score(score), 4)
-    safe_total_reward = round(_strict_open_score(total_reward, fallback=0.1), 4)
+    # total_reward shouldn't be clamped by _strict_open_score to [0,1] 
+    # as it's a sum of many rewards. 
+    safe_total_reward = round(float(total_reward), 4)
+
     print(
         f'[END] {json.dumps({"task_id": task_id, "total_steps": total_steps, "total_reward": safe_total_reward, "score": safe_score, "outcome": outcome})}',
         flush=True,

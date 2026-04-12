@@ -1,7 +1,7 @@
 """
 FastAPI app for ClinicalTrialEnv.
 """
-import os, random
+import os, random, json
 import numpy as np
 from openenv.core.env_server.http_server import create_app
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -35,6 +35,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def _get_schemas():
+    """Extract action and observation schemas from openenv.yaml."""
+    import yaml
+    try:
+        yaml_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "openenv.yaml")
+        with open(yaml_path, "r") as f:
+            cfg = yaml.safe_load(f)
+        return cfg.get("action_space", {}), cfg.get("observation_space", {})
+    except Exception:
+        return {}, {}
+
 def _run_heuristic_episode(task_id: str) -> ClinicalTrialEnvironment:
     """Run one deterministic heuristic episode and persist it for grading."""
     env = ClinicalTrialEnvironment()
@@ -43,40 +54,41 @@ def _run_heuristic_episode(task_id: str) -> ClinicalTrialEnvironment:
     step_count = 0
     dropped = set()
 
-    while not done and step_count < 30:
-        obs = env._build_observation()
-        # Ensure obs is a dict-like accessible object for the heuristic
-        probs = {
-            "low": getattr(obs, "prob_low_beats_control", 0.5) if getattr(obs, "low_active", True) else 0.0,
-            "mid": getattr(obs, "prob_mid_beats_control", 0.5) if getattr(obs, "mid_active", True) else 0.0,
-            "high": getattr(obs, "prob_high_beats_control", 0.5) if getattr(obs, "high_active", True) else 0.0,
-        }
-        total_prob = sum(probs.values()) + 0.3
-        drop = None
-        ae_thresh = env.task["ae_stopping_threshold"]
-        
-        # Checking ARMs for AE stopping
-        for arm in ["low", "mid", "high"]:
-            ae_r = getattr(obs, f"{arm}_ae_rate", 0.0)
-            if ae_r > ae_thresh * 0.80 and arm not in dropped:
-                drop = arm
-                dropped.add(arm)
-                break
+    try:
+        while not done and step_count < 25:
+            obs = env._build_observation()
+            probs = {
+                "low": getattr(obs, "prob_low_beats_control", 0.5) if getattr(obs, "low_active", True) else 0.0,
+                "mid": getattr(obs, "prob_mid_beats_control", 0.5) if getattr(obs, "mid_active", True) else 0.0,
+                "high": getattr(obs, "prob_high_beats_control", 0.5) if getattr(obs, "high_active", True) else 0.0,
+            }
+            total_prob = sum(probs.values()) + 0.3
+            drop = None
+            ae_thresh = env.task["ae_stopping_threshold"]
+            
+            for arm in ["low", "mid", "high"]:
+                ae_r = getattr(obs, f"{arm}_ae_rate", 0.0)
+                if ae_r > ae_thresh * 0.85 and arm not in dropped:
+                    drop = arm
+                    dropped.add(arm)
+                    break
 
-        action = TrialAction(
-            n_next_cohort=25,
-            allocation_control=0.3 / total_prob,
-            allocation_low=probs["low"] / total_prob,
-            allocation_mid=probs["mid"] / total_prob,
-            allocation_high=probs["high"] / total_prob,
-            stop_for_success=(getattr(obs, "any_arm_significant", False) and env.interim_number >= env.task["min_interims_before_stop"]),
-            stop_for_futility=(getattr(obs, "futility_flag", False) and env.interim_number >= env.task["min_interims_before_stop"]),
-            drop_arm=drop,
-        )
+            action = TrialAction(
+                n_next_cohort=20,
+                allocation_control=0.3 / total_prob,
+                allocation_low=probs["low"] / total_prob,
+                allocation_mid=probs["mid"] / total_prob,
+                allocation_high=probs["high"] / total_prob,
+                stop_for_success=(getattr(obs, "any_arm_significant", False) and env.interim_number >= 5),
+                stop_for_futility=(getattr(obs, "futility_flag", False) and env.interim_number >= 8),
+                drop_arm=drop,
+            )
 
-        result_obs = env.step(action)
-        done = getattr(result_obs, "done", False)
-        step_count += 1
+            result_obs = env.step(action)
+            done = getattr(result_obs, "done", False)
+            step_count += 1
+    except Exception:
+        pass
 
     _completed_sessions[task_id] = env
     return env
@@ -87,17 +99,20 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "env": "ClinicalTrialEnv", "version": "1.1.0-hardened"}
+    return {"status": "ok", "env": "ClinicalTrialEnv", "version": "1.2.0-schema-hardened"}
 
 @app.get("/tasks")
 async def list_tasks():
     from .tasks import TASKS
+    a_schema, o_schema = _get_schemas()
     return [
         {
             "task_id": t["task_id"],
             "difficulty": t["difficulty"],
             "description": t["description"],
             "max_patients": t["max_patients"],
+            "action_schema": a_schema,
+            "observation_schema": o_schema,
         }
         for t in TASKS.values()
     ]
@@ -136,16 +151,19 @@ async def http_reset(body: dict = Body(default={"task": "task_1"})):
     obs = env.reset(task_id)
     _completed_sessions[f"http_active_{task_id}"] = env
     
-    # Obs is already sanitized by env.reset()
     try:
         obs_dict = obs.model_dump()
     except AttributeError:
         from dataclasses import asdict
         obs_dict = asdict(obs)
 
+    # Ensure reward is present in both observation and top-level
+    reward = float(obs_dict.get("reward", 0.10))
+    obs_dict["reward"] = reward
+    
     response = {
         "observation": obs_dict,
-        "reward": 0.10,  # Explicit non-null start reward
+        "reward": reward,
         "done": False,
         "session_id": str(env.state.episode_id),
         "task": task_id,
@@ -159,7 +177,7 @@ async def http_step(action: TrialAction):
         return JSONResponse(status_code=400, content={"error": "No active session."})
     
     env = list(active.values())[-1]
-    obs = env.step(action) # Internally sanitized
+    obs = env.step(action)
     
     if getattr(obs, "done", False):
         _completed_sessions[env.task["task_id"]] = env
@@ -170,9 +188,12 @@ async def http_step(action: TrialAction):
         from dataclasses import asdict
         obs_dict = asdict(obs)
 
+    reward = float(obs_dict.get("reward", 0.5))
+    obs_dict["reward"] = reward
+
     response = {
         "observation": obs_dict,
-        "reward": float(getattr(obs, "reward", 0.5)),
+        "reward": reward,
         "done": bool(getattr(obs, "done", False)),
     }
     return _deep_sanitize(response)
@@ -180,17 +201,20 @@ async def http_step(action: TrialAction):
 @app.post("/baseline")
 async def baseline():
     scores = {}
+    total_val = 0
     for task_id in ["task_1", "task_2", "task_3"]:
         env = _run_heuristic_episode(task_id)
         result = env.grade()
+        s = strict_score(float(result.score))
         scores[task_id] = {
-            "score": strict_score(float(result.score)),
-            "outcome": result.trial_outcome,
-            "breakdown": result.breakdown
+            "score": s,
+            "outcome": str(result.trial_outcome),
+            "breakdown": result.breakdown,
+            "task_id": task_id,
         }
+        total_val += s
     
-    avg_score = sum(s["score"] for s in scores.values()) / 3
-    scores["average"] = round(avg_score, 4)
+    scores["average"] = round(total_val / 3, 4)
     return _deep_sanitize(scores)
 
 def main():

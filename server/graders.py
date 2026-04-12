@@ -2,10 +2,10 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
-STRICT_SCORE_MIN = 0.10  # Very safe margin from 0.0
-STRICT_SCORE_MAX = 0.90  # Very safe margin from 1.0
-BREAKDOWN_FLOAT_MIN = 0.001
-BREAKDOWN_FLOAT_MAX = 0.999
+STRICT_SCORE_MIN = 0.10
+STRICT_SCORE_MAX = 0.90
+BREAKDOWN_FLOAT_MIN = 0.10
+BREAKDOWN_FLOAT_MAX = 0.90
 BREAKDOWN_FLOAT_DIGITS = 4
 
 
@@ -37,14 +37,13 @@ def serialize_metric(value, digits: int = BREAKDOWN_FLOAT_DIGITS):
 
 
 def _deep_sanitize(obj):
-    """Recursively clamp every float to (0.001, 0.999) including numpy types."""
+    """Recursively clamp EVERY float to [0.1, 0.9] to survive aggressive validator rounding."""
     if isinstance(obj, bool):
         return obj
     if isinstance(obj, (float, np.floating)):
         if not np.isfinite(obj):
             return 0.5
-        # Force conversion to python float to avoid numpy-specific serialization issues
-        return float(np.clip(obj, 0.001, 0.999))
+        return float(np.clip(obj, 0.10, 0.90))
     if isinstance(obj, (int, np.integer)):
         return int(obj)
     if isinstance(obj, dict):

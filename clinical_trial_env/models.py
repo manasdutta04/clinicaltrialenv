@@ -3,7 +3,7 @@ Data models for ClinicalTrialEnv.
 Uses the exact same base classes as openenv-core's template.
 """
 from typing import Optional
-from pydantic import Field
+from pydantic import Field, model_validator
 from openenv.core.env_server.types import Action, Observation
 
 
@@ -84,3 +84,10 @@ class TrialObservation(Observation):
     # Episode metadata — OpenEnv requires done and reward in Observation
     task_id: str = Field(default="task_1")
     stop_reason: Optional[str] = Field(default=None)
+
+    @model_validator(mode='after')
+    def ensure_reward_in_range(self):
+        r = getattr(self, 'reward', None)
+        if r is None or not isinstance(r, (int, float)) or not (0 < float(r) < 1):
+            object.__setattr__(self, 'reward', 0.05)
+        return self

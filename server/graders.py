@@ -2,8 +2,8 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
-STRICT_SCORE_MIN = 0.01  # Keep scores safely away from 0.0 after formatting.
-STRICT_SCORE_MAX = 0.95  # Keep scores comfortably away from 1.0 after formatting.
+STRICT_SCORE_MIN = 0.05  # Keep scores safely away from 0.0 after formatting.
+STRICT_SCORE_MAX = 0.93  # Keep scores comfortably away from 1.0 after formatting.
 BREAKDOWN_FLOAT_MIN = 0.0001
 BREAKDOWN_FLOAT_MAX = 0.9999
 BREAKDOWN_FLOAT_DIGITS = 4
@@ -62,7 +62,7 @@ def efficacy_grader(session_state: dict) -> GraderResult:
         score = 0.30 * max(0.001, 1.0 - best_p / 0.05)
 
     return GraderResult(
-        score=strict_score(score),
+        score=max(0.02, min(0.94, strict_score(score))),
         task_id="task_1",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -94,7 +94,7 @@ def tradeoff_grader(session_state: dict) -> GraderResult:
 
     score = efficacy_score + safety_score
     return GraderResult(
-        score=strict_score(score),
+        score=max(0.02, min(0.94, strict_score(score))),
         task_id="task_2",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
@@ -125,7 +125,7 @@ def efficiency_grader(session_state: dict) -> GraderResult:
         score = 0.15 + 0.20 * max(0.001, 1.0 - best_p / 0.10)
 
     return GraderResult(
-        score=strict_score(score),
+        score=max(0.02, min(0.94, strict_score(score))),
         task_id="task_3",
         trial_outcome=stop or "budget_exhausted",
         breakdown={
